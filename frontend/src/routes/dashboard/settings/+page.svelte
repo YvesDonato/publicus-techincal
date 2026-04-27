@@ -1,4 +1,6 @@
 <script lang="ts">
+  import WorkspaceSidebar from '$lib/WorkspaceSidebar.svelte';
+  import WorkspaceTopbar from '$lib/WorkspaceTopbar.svelte';
   const notificationSettings = [
     {
       title: 'New high-fit programs',
@@ -19,7 +21,7 @@
 
   const dataControls = [
     ['Company profile', 'Stored locally in this browser'],
-    ['Saved programs', 'Synced to this workspace view'],
+    ['Saved programs', 'Available in this workspace'],
     ['Export format', 'CSV and application brief']
   ];
 </script>
@@ -35,85 +37,11 @@
   />
 </svelte:head>
 
-<div class="fundradar-dashboard flex h-screen overflow-hidden bg-[#f7f9fb] text-[#191c1e]">
-  <nav class="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-slate-50 md:flex" aria-label="FundRadar workspace navigation">
-    <div class="flex h-full flex-col gap-2 p-4">
-      <div class="mb-4 flex items-center gap-3 px-2 py-4">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-600 font-bold text-white">FR</div>
-        <div>
-          <h1 class="m-0 font-[Public_Sans] text-xl font-black leading-none tracking-normal text-slate-900">FundRadar</h1>
-          <span class="text-xs text-slate-500">Enterprise Funding</span>
-        </div>
-      </div>
-
-      <div class="flex flex-1 flex-col gap-1">
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/dashboard">
-          <span class="material-symbols-outlined">explore</span>
-          <span>Discovery</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/persona">
-          <span class="material-symbols-outlined">business_center</span>
-          <span>Company Profile</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/live-view">
-          <span class="material-symbols-outlined">insert_chart</span>
-          <span>Analytics</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/persona/matches">
-          <span class="material-symbols-outlined">description</span>
-          <span>Opportunity Matches</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md bg-emerald-50 px-3 py-2.5 text-emerald-700" href="/settings" aria-current="page">
-          <span class="material-symbols-outlined text-emerald-600">settings</span>
-          <span>Settings</span>
-        </a>
-      </div>
-
-      <div class="my-4 px-2">
-        <a class="block w-full rounded-lg bg-emerald-600 py-2.5 text-center font-semibold text-white hover:bg-emerald-700" href="/persona/matches">
-          Find Funding
-        </a>
-      </div>
-
-      <div class="flex flex-col gap-1 border-t border-slate-200 pt-4">
-        <a class="flex items-center gap-3 rounded-md px-3 py-2 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/">
-          <span class="material-symbols-outlined">contact_support</span>
-          <span>Support</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/">
-          <span class="material-symbols-outlined">logout</span>
-          <span>Log Out</span>
-        </a>
-      </div>
-    </div>
-  </nav>
+<div class="flex h-screen overflow-hidden bg-[#f7f9fb] font-[Inter,ui-sans-serif,system-ui,sans-serif] text-[#191c1e]">
+  <WorkspaceSidebar active="settings" />
 
   <div class="relative flex h-screen min-w-0 flex-1 flex-col bg-[#f7f9fb]">
-    <header class="sticky top-0 z-40 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 py-3 shadow-sm">
-      <div class="flex max-w-md flex-1 items-center">
-        <div class="relative hidden w-full md:block">
-          <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-slate-400">search</span>
-          <input
-            class="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-slate-900 transition focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-600/20"
-            placeholder="Search settings..."
-            type="search"
-          />
-        </div>
-        <span class="block text-lg font-bold text-slate-900 md:hidden">FundRadar</span>
-      </div>
-
-      <div class="ml-4 flex items-center gap-2 md:gap-4">
-        <button class="rounded-full p-2 text-emerald-600 transition hover:bg-slate-50" type="button" aria-label="Notifications">
-          <span class="material-symbols-outlined">notifications</span>
-        </button>
-        <button class="rounded-full p-2 text-emerald-600 transition hover:bg-slate-50" type="button" aria-label="Help">
-          <span class="material-symbols-outlined">help_outline</span>
-        </button>
-        <div class="ml-2 flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-emerald-700 text-xs font-black text-white">
-          FR
-        </div>
-      </div>
-    </header>
+    <WorkspaceTopbar placeholder="Search settings, pages, or funding data..." />
 
     <main class="flex-1 overflow-y-auto p-4 md:p-6">
       <div class="mx-auto max-w-[1440px]">
@@ -125,7 +53,7 @@
             </p>
           </div>
           <div class="flex gap-2">
-            <a class="flex items-center gap-2 rounded-lg border border-[#c6c6cd] px-4 py-2 text-sm font-semibold text-[#191c1e] transition hover:bg-[#eceef0]" href="/persona">
+            <a class="flex items-center gap-2 rounded-lg border border-[#c6c6cd] px-4 py-2 text-sm font-semibold text-[#191c1e] transition hover:bg-[#eceef0]" href="/dashboard/persona">
               <span class="material-symbols-outlined text-[18px]">badge</span>
               Company Profile
             </a>
@@ -190,7 +118,7 @@
                 <label class="grid gap-2 text-sm font-semibold text-[#45464d]">
                   Default route
                   <select class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-normal text-[#191c1e] focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-600/20">
-                    <option>Funding Discovery</option>
+                    <option>Overview</option>
                     <option>Company Profile</option>
                     <option>Discovery</option>
                   </select>
@@ -246,7 +174,7 @@
               <p class="m-0 mb-5 text-sm leading-6 text-[#45464d]">
                 Settings are managed separately from eligibility details, funding criteria, and saved application context.
               </p>
-              <a class="inline-flex items-center gap-2 rounded-lg border border-[#c6c6cd] px-4 py-2 text-sm font-semibold text-[#191c1e] transition hover:bg-[#eceef0]" href="/persona">
+              <a class="inline-flex items-center gap-2 rounded-lg border border-[#c6c6cd] px-4 py-2 text-sm font-semibold text-[#191c1e] transition hover:bg-[#eceef0]" href="/dashboard/persona">
                 Open Company Profile
                 <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
               </a>
@@ -290,30 +218,3 @@
     </main>
   </div>
 </div>
-
-<style>
-  .fundradar-dashboard {
-    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  }
-
-  .material-symbols-outlined {
-    font-family: "Material Symbols Outlined";
-    font-weight: normal;
-    font-style: normal;
-    line-height: 1;
-    letter-spacing: normal;
-    text-transform: none;
-    display: inline-block;
-    white-space: nowrap;
-    overflow-wrap: normal;
-    direction: ltr;
-    font-feature-settings: "liga";
-    -webkit-font-feature-settings: "liga";
-    -webkit-font-smoothing: antialiased;
-    font-variation-settings:
-      "FILL" 0,
-      "wght" 400,
-      "GRAD" 0,
-      "opsz" 24;
-  }
-</style>

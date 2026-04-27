@@ -37,7 +37,7 @@
             ]
           );
           frontendSrc = ./frontend;
-          npmDepsHash = "sha256-e3syREKhT4lWrOOxD8iTdZpz9k++jgxJxZsg3vLBMZw=";
+          npmDepsHash = "sha256-2tMpuPpgETmQHeE9y1EACSAmnam/LcuQ5RO59vj6MpQ=";
           npmDeps = pkgs.fetchNpmDeps {
             name = "publicus-frontend-0.0.1-npm-deps";
             src = frontendSrc;

@@ -1,329 +1,228 @@
 <script lang="ts">
-  const overviewStats = [
-    {
-      label: 'Programs indexed',
-      value: '200+',
-      detail: 'Grants, loans, tax credits, and wage subsidies'
-    },
-    {
-      label: 'Funding surfaced',
-      value: '$50M+',
-      detail: 'Matched public support tracked in one workspace'
-    },
-    {
-      label: 'Profile stages',
-      value: '3',
-      detail: 'Company profile, ranked matches, application review'
-    }
+  const heroImageUrl =
+    'https://lh3.googleusercontent.com/aida-public/AB6AXuBcBVuPcgYNmKqVqxs-gdunb5xUGjHnKM-9iZbHUnteUi-NE5-57dW7NtovKD2C51ZUG5RCh78Aa2xuG-nUVfvD3BNj3PBqiixQMz57y4QK7It_xjaU5TV_pxT4SOEsiP3Mmquxg_usN5DJHKz3WMG2TAc8h_dKUc6eFd4nBys3VEC51R5TR9EgfcoFWGWlgcorQM9m1cAXHZmA0IR1hAd0DN8scuxjzCMZs2amb--_1NfynwtdAcBMn3WSyqzLO_eGKeicK5QY0R4y';
+
+  const metrics = [
+    { label: 'Funding Matched', value: '$50M+' },
+    { label: 'Active Programs', value: '200+' }
   ];
 
-  const platformCards = [
+  const features = [
     {
-      icon: 'travel_explore',
+      icon: 'database',
       title: 'Centralized Discovery',
-      copy: 'Browse Canadian government funding programs without moving between agency portals.'
+      copy: 'Stop digging through government portals. Access grants, loans, tax credits, and support programs in one place.'
     },
     {
-      icon: 'rule_settings',
+      icon: 'my_location',
       title: 'Precision Matching',
-      copy: 'Use company profile signals to identify programs that are realistic for your team to pursue.'
+      copy: 'Create a company profile once and let FundRadar surface the programs that fit your eligibility signals.'
     },
     {
-      icon: 'leaderboard',
-      title: 'Ranked Pipeline',
-      copy: 'Compare opportunities by fit, funding type, amount, sector, and application readiness.'
+      icon: 'trending_up',
+      title: 'Data-Driven Ranking',
+      copy: 'Prioritize your work with relevance scores based on your business goals, industry, location, and funding needs.'
     }
   ];
 
-  const workflowSteps = [
+  const steps = [
     {
-      step: '01',
-      title: 'Build the company profile',
-      detail: 'Capture sector, stage, location, team size, and funding goals before searching.'
+      title: 'Build your Profile',
+      copy: 'Tell us about your business, industry, and goals to set the baseline for the matching engine.'
     },
     {
-      step: '02',
-      title: 'Review eligible programs',
-      detail: 'Move from a broad dataset into ranked grants, credits, subsidies, and support programs.'
+      title: 'Discover Matches',
+      copy: 'See ranked opportunities tailored to your eligibility criteria and the records available in FundRadar.'
     },
     {
-      step: '03',
-      title: 'Shortlist next actions',
-      detail: 'Save promising records and move the strongest opportunities into application prep.'
+      title: 'Apply with Confidence',
+      copy: 'Review requirements, shortlist realistic programs, and focus effort on applications worth pursuing.'
     }
-  ];
-
-  const coverageItems = [
-    { label: 'Grants', status: 'Open intake', tone: 'emerald' },
-    { label: 'Tax credits', status: 'Profile dependent', tone: 'slate' },
-    { label: 'Loans', status: 'Repayable', tone: 'slate' },
-    { label: 'Wage subsidies', status: 'Hiring signals', tone: 'slate' }
   ];
 </script>
 
 <svelte:head>
-  <title>FundRadar Overview</title>
+  <title>FundRadar - Institutional Growth</title>
   <meta
     name="description"
-    content="FundRadar helps Canadian businesses discover, match, and rank government funding opportunities."
+    content="FundRadar helps Canadian businesses discover, match, and rank government grants and support programs."
   />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Public+Sans:wght@600;700;900&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@600;700;900&family=Inter:wght@400;600;700;800;900&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
     rel="stylesheet"
   />
 </svelte:head>
 
-<div class="fundradar-dashboard flex h-screen overflow-hidden bg-[#f7f9fb] text-[#191c1e]">
-  <nav class="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-slate-50 md:flex" aria-label="Workspace navigation">
-    <div class="flex h-full flex-col gap-2 p-4">
-      <div class="mb-4 flex items-center gap-3 px-2 py-4">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-600 font-bold text-white">FR</div>
-        <div>
-          <h1 class="m-0 font-[Public_Sans] text-xl font-black leading-none tracking-normal text-slate-900">FundRadar</h1>
-          <span class="text-xs text-slate-500">Enterprise Funding</span>
-        </div>
-      </div>
+<div class="flex min-h-screen flex-col bg-[#f7f9fb] font-[Inter,ui-sans-serif,system-ui,sans-serif] text-[#191c1e] antialiased">
+  <header class="sticky top-0 z-50 border-b border-[#e0e3e5] bg-white px-4 py-3 md:px-10">
+    <div class="mx-auto flex max-w-[1280px] items-center justify-between gap-5">
+      <a class="flex min-w-0 items-center gap-3 text-[#191c1e] no-underline" href="/" aria-label="FundRadar home">
+        <span
+          class="material-symbols-outlined flex size-8 shrink-0 items-center justify-center text-[26px] text-emerald-700"
+          style="font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 24;"
+          aria-hidden="true"
+        >
+          radar
+        </span>
+        <span class="truncate font-[Public_Sans] text-lg font-black leading-tight tracking-normal">FundRadar</span>
+      </a>
 
-      <div class="flex flex-1 flex-col gap-1">
-        <a class="flex items-center gap-3 rounded-md bg-emerald-50 px-3 py-2.5 text-emerald-700" href="/" aria-current="page">
-          <span class="material-symbols-outlined text-emerald-600">dashboard</span>
-          <span>Overview</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/dashboard">
-          <span class="material-symbols-outlined">explore</span>
-          <span>Discovery</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/persona">
-          <span class="material-symbols-outlined">business_center</span>
-          <span>Company Profile</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/live-view">
-          <span class="material-symbols-outlined">insert_chart</span>
-          <span>Analytics</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/persona/matches">
-          <span class="material-symbols-outlined">description</span>
-          <span>Opportunity Matches</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/settings">
-          <span class="material-symbols-outlined">settings</span>
-          <span>Settings</span>
-        </a>
-      </div>
+      <nav class="hidden items-center gap-9 md:flex" aria-label="Primary navigation">
+        <a class="text-sm font-semibold text-[#45464d] no-underline transition hover:text-[#191c1e]" href="#features">Features</a>
+        <a class="text-sm font-semibold text-[#45464d] no-underline transition hover:text-[#191c1e]" href="#how-it-works">How it Works</a>
+        <a class="text-sm font-semibold text-[#45464d] no-underline transition hover:text-[#191c1e]" href="#pricing">Pricing</a>
+      </nav>
 
-      <div class="my-4 px-2">
-        <a class="block w-full rounded-lg bg-emerald-600 py-2.5 text-center font-semibold text-white hover:bg-emerald-700" href="/persona/matches">
-          Find Funding
+      <div class="flex shrink-0 gap-2">
+        <a
+          class="flex h-10 min-w-20 items-center justify-center rounded bg-emerald-700 px-4 text-sm font-semibold text-white no-underline transition hover:bg-emerald-800"
+          href="/signup?next=%2Fdashboard%2Fpersona"
+        >
+          Get Started
         </a>
-      </div>
-
-      <div class="flex flex-col gap-1 border-t border-slate-200 pt-4">
-        <a class="flex items-center gap-3 rounded-md px-3 py-2 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/">
-          <span class="material-symbols-outlined">contact_support</span>
-          <span>Support</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/">
-          <span class="material-symbols-outlined">logout</span>
-          <span>Log Out</span>
+        <a
+          class="flex h-10 min-w-20 items-center justify-center rounded border border-[#c6c6cd] bg-[#e6e8ea] px-4 text-sm font-semibold text-[#191c1e] no-underline transition hover:bg-[#e0e3e5]"
+          href="/login"
+        >
+          Log In
         </a>
       </div>
     </div>
-  </nav>
+  </header>
 
-  <div class="relative flex h-screen min-w-0 flex-1 flex-col bg-[#f7f9fb]">
-    <header class="sticky top-0 z-40 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 py-3 shadow-sm">
-      <div class="flex max-w-md flex-1 items-center">
-        <div class="relative hidden w-full md:block">
-          <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-slate-400">search</span>
-          <input
-            class="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-slate-900 transition focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-600/20"
-            placeholder="Search programs, sectors, or agencies..."
-            type="search"
-          />
-        </div>
-        <span class="block text-lg font-bold text-slate-900 md:hidden">FundRadar</span>
-      </div>
-
-      <div class="ml-4 flex items-center gap-2 md:gap-4">
-        <a class="hidden rounded-lg border border-[#c6c6cd] px-4 py-2 text-sm font-semibold text-[#191c1e] transition hover:bg-[#eceef0] sm:inline-flex" href="/dashboard">
-          Open Grants
-        </a>
-        <button class="rounded-full p-2 text-emerald-600 transition hover:bg-slate-50" type="button" aria-label="Notifications">
-          <span class="material-symbols-outlined">notifications</span>
-        </button>
-        <button class="rounded-full p-2 text-emerald-600 transition hover:bg-slate-50" type="button" aria-label="Help">
-          <span class="material-symbols-outlined">help_outline</span>
-        </button>
-        <div class="ml-2 flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-emerald-700 text-xs font-black text-white">
-          FR
+  <main class="flex w-full flex-1 flex-col items-center">
+    <section class="mx-auto w-full max-w-[1280px] px-4 py-10 md:px-6 md:py-12">
+      <div
+        class="relative flex min-h-[500px] items-center justify-center overflow-hidden rounded-xl bg-cover bg-center px-6 py-12 text-center md:min-h-[560px] md:px-16"
+        style={`background-image: linear-gradient(rgba(19, 27, 46, 0.70), rgba(19, 27, 46, 0.82)), url('${heroImageUrl}');`}
+        aria-label="Modern high-rise office building complex in Toronto financial district with soft twilight lighting and glass reflections"
+      >
+        <div class="relative z-10 flex max-w-3xl flex-col items-center gap-5">
+          <h1 class="m-0 font-[Public_Sans] text-4xl font-black leading-tight tracking-normal text-white md:text-5xl">
+            Unlock the Funding Your Business Deserves.
+          </h1>
+          <p class="m-0 max-w-2xl text-lg leading-8 text-[#dae2fd] md:text-xl">
+            The intelligent discovery tool for Canadian grants and government support. Find, match, and rank the best
+            opportunities for your growth in minutes.
+          </p>
+          <a
+            class="mt-3 flex h-12 items-center justify-center rounded-lg bg-emerald-600 px-8 text-sm font-black text-white no-underline shadow-lg transition hover:bg-emerald-700"
+            href="/signup?next=%2Fdashboard%2Fpersona"
+          >
+            Get Started for Free
+          </a>
         </div>
       </div>
-    </header>
+    </section>
 
-    <main class="flex-1 overflow-y-auto p-4 md:p-6">
-      <div class="mx-auto max-w-[1440px]">
-        <div class="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-          <div>
-            <p class="m-0 mb-2 text-xs font-semibold uppercase tracking-normal text-emerald-700">Workspace Overview</p>
-            <h2 class="m-0 mb-2 font-[Public_Sans] text-4xl font-semibold leading-tight tracking-normal text-[#191c1e]">
-              Funding intelligence for Canadian growth teams
-            </h2>
-            <p class="m-0 max-w-3xl text-base leading-6 text-[#45464d]">
-              FundRadar brings funding discovery, eligibility matching, and application prioritization into a single
-              operating view.
-            </p>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <a class="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-800" href="/persona">
-              Build Profile
-            </a>
-            <a class="rounded-lg border border-[#c6c6cd] px-4 py-2 text-sm font-semibold text-[#0b1c30] transition hover:bg-[#eceef0]" href="/dashboard">
-              Browse Grants
-            </a>
-          </div>
+    <section class="mx-auto w-full max-w-[1280px] px-4 pb-12 md:px-6" aria-label="FundRadar statistics">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {#each metrics as metric (metric.label)}
+          <article class="rounded-lg border border-[#e0e3e5] bg-[#eceef0] p-6 text-center shadow-sm">
+            <p class="m-0 text-sm font-black uppercase tracking-normal text-[#45464d]">{metric.label}</p>
+            <p class="m-0 mt-2 font-[Public_Sans] text-4xl font-black leading-tight text-black">{metric.value}</p>
+          </article>
+        {/each}
+      </div>
+    </section>
+
+    <section id="features" class="mx-auto mb-12 w-full max-w-[1280px] px-4 py-12 md:px-6">
+      <div class="rounded-xl bg-[#f2f4f6] px-4 py-12 md:px-8">
+        <div class="mx-auto flex max-w-2xl flex-col gap-4 text-center">
+          <h2 class="m-0 font-[Public_Sans] text-4xl font-black leading-tight text-black">Why FundRadar?</h2>
+          <p class="m-0 text-lg leading-8 text-[#45464d]">
+            We make finding government funding simple, efficient, and targeted to your specific business needs.
+          </p>
         </div>
 
-        <section class="grid grid-cols-1 gap-4 md:grid-cols-3" aria-label="FundRadar platform statistics">
-          {#each overviewStats as stat (stat.label)}
-            <article class="rounded-xl border border-[#c6c6cd] bg-white p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)]">
-              <p class="m-0 mb-3 text-xs font-semibold uppercase tracking-normal text-[#45464d]">{stat.label}</p>
-              <strong class="mb-2 block font-[Public_Sans] text-4xl font-semibold leading-tight text-[#191c1e]">{stat.value}</strong>
-              <p class="m-0 text-sm leading-6 text-[#45464d]">{stat.detail}</p>
+        <div class="mt-10 grid grid-cols-1 gap-6 md:grid-cols-3">
+          {#each features as feature (feature.title)}
+            <article class="flex flex-col gap-4 rounded-xl border border-[#c6c6cd] bg-white p-6 shadow-sm transition hover:shadow-md">
+              <div class="mb-2 flex size-12 items-center justify-center rounded-lg bg-[#6ffbbe] text-emerald-900">
+                <span class="material-symbols-outlined text-2xl">{feature.icon}</span>
+              </div>
+              <div class="flex flex-col gap-2">
+                <h3 class="m-0 font-[Public_Sans] text-xl font-black leading-tight text-black">{feature.title}</h3>
+                <p class="m-0 text-base leading-7 text-[#45464d]">{feature.copy}</p>
+              </div>
             </article>
           {/each}
-        </section>
-
-        <div class="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
-          <section class="flex flex-col gap-6 lg:col-span-8" aria-labelledby="platform-heading">
-            <article class="overflow-hidden rounded-xl border border-[#c6c6cd] bg-white shadow-[0_4px_20px_rgba(0,0,0,0.04)]">
-              <div class="flex flex-col gap-6 bg-[#131b2e] p-6 md:flex-row md:items-end md:justify-between">
-                <div>
-                  <span class="mb-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-semibold uppercase tracking-normal text-white">
-                    <span class="material-symbols-outlined text-[14px]">radar</span>
-                    Overview
-                  </span>
-                  <h3 id="platform-heading" class="m-0 mb-2 font-[Public_Sans] text-3xl font-semibold leading-tight text-[#dae2fd]">
-                    Replace scattered program research with a managed funding pipeline.
-                  </h3>
-                  <p class="m-0 max-w-2xl text-sm leading-6 text-[#dae2fd]/80">
-                    Concise status, direct entry points, and grounded workflow context help teams move from discovery
-                    into application prep.
-                  </p>
-                </div>
-                <a class="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700" href="/dashboard">
-                  View Grants
-                </a>
-              </div>
-
-              <div class="grid grid-cols-1 gap-px bg-[#c6c6cd] md:grid-cols-3">
-                {#each platformCards as card (card.title)}
-                  <div class="bg-white p-5">
-                    <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
-                      <span class="material-symbols-outlined">{card.icon}</span>
-                    </div>
-                    <h4 class="m-0 mb-2 text-lg font-semibold leading-snug text-[#191c1e]">{card.title}</h4>
-                    <p class="m-0 text-sm leading-6 text-[#45464d]">{card.copy}</p>
-                  </div>
-                {/each}
-              </div>
-            </article>
-
-            <section class="rounded-xl border border-[#c6c6cd] bg-white p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)]" aria-labelledby="workflow-heading">
-              <div class="mb-5 flex items-center justify-between border-b border-[#c6c6cd] pb-3">
-                <div>
-                  <h3 id="workflow-heading" class="m-0 text-sm font-semibold text-[#191c1e]">Recommended Workflow</h3>
-                  <p class="m-0 mt-1 text-sm text-[#45464d]">A dashboard-first path from overview to application prep.</p>
-                </div>
-                <span class="material-symbols-outlined text-emerald-700">account_tree</span>
-              </div>
-
-              <div class="grid gap-4">
-                {#each workflowSteps as item (item.step)}
-                  <article class="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[4rem_1fr_auto] md:items-center">
-                    <span class="font-[Public_Sans] text-2xl font-semibold text-emerald-700">{item.step}</span>
-                    <div>
-                      <h4 class="m-0 mb-1 text-base font-semibold text-[#191c1e]">{item.title}</h4>
-                      <p class="m-0 text-sm leading-6 text-[#45464d]">{item.detail}</p>
-                    </div>
-                    <span class="material-symbols-outlined hidden text-slate-400 md:block">chevron_right</span>
-                  </article>
-                {/each}
-              </div>
-            </section>
-          </section>
-
-          <aside class="flex flex-col gap-6 lg:sticky lg:top-4 lg:col-span-4">
-            <section class="rounded-xl border border-[#c6c6cd] bg-white p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)]" aria-labelledby="coverage-heading">
-              <div class="mb-4 flex items-center justify-between border-b border-[#c6c6cd] pb-3">
-                <h3 id="coverage-heading" class="m-0 text-sm font-semibold text-[#191c1e]">Funding Coverage</h3>
-                <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-normal text-emerald-700">Live</span>
-              </div>
-
-              <div class="grid gap-3">
-                {#each coverageItems as item (item.label)}
-                  <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-                    <div class="flex items-center gap-3">
-                      <span
-                        class={`h-2.5 w-2.5 rounded-full ${item.tone === 'emerald' ? 'bg-emerald-600' : 'bg-slate-400'}`}
-                        aria-hidden="true"
-                      ></span>
-                      <span class="text-sm font-semibold text-[#191c1e]">{item.label}</span>
-                    </div>
-                    <span class="text-xs font-semibold uppercase tracking-normal text-[#45464d]">{item.status}</span>
-                  </div>
-                {/each}
-              </div>
-            </section>
-
-            <section class="rounded-xl border border-[#c6c6cd] bg-white p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)]" aria-labelledby="next-heading">
-              <div class="mb-4 flex items-center gap-3">
-                <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-[#131b2e] text-[#dae2fd]">
-                  <span class="material-symbols-outlined">task_alt</span>
-                </div>
-                <div>
-                  <h3 id="next-heading" class="m-0 text-base font-semibold text-[#191c1e]">Next best action</h3>
-                  <p class="m-0 text-sm text-[#45464d]">Create or update your profile before ranking matches.</p>
-                </div>
-              </div>
-              <a class="mb-3 block rounded-lg bg-emerald-700 px-4 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-emerald-800" href="/persona">
-                Continue to Profile
-              </a>
-              <a class="block rounded-lg border border-[#c6c6cd] px-4 py-2.5 text-center text-sm font-semibold text-[#0b1c30] transition hover:bg-[#eceef0]" href="/live-view">
-                Open Analytics
-              </a>
-            </section>
-          </aside>
         </div>
       </div>
-    </main>
-  </div>
+    </section>
+
+    <section id="how-it-works" class="mx-auto mb-12 w-full max-w-[1280px] px-4 py-12 md:px-6">
+      <div class="mx-auto flex max-w-2xl flex-col gap-4 text-center">
+        <h2 class="m-0 font-[Public_Sans] text-4xl font-black leading-tight text-black">How it Works</h2>
+        <p class="m-0 text-lg leading-8 text-[#45464d]">
+          A streamlined process designed to get you from discovery to application without the overhead.
+        </p>
+      </div>
+
+      <div class="relative mt-10 grid grid-cols-1 gap-8 md:grid-cols-3">
+        <div class="absolute left-0 top-8 z-0 hidden h-px w-full bg-[#e0e3e5] md:block"></div>
+
+        {#each steps as step, index (step.title)}
+          <article class="relative z-10 flex flex-col items-center gap-4 bg-[#f7f9fb] text-center md:px-4">
+            <div
+              class={`flex size-16 items-center justify-center rounded-full border-4 border-[#f7f9fb] font-[Public_Sans] text-2xl font-black text-white shadow-md ${
+                index === 2 ? 'bg-emerald-700' : 'bg-[#131b2e]'
+              }`}
+            >
+              {index + 1}
+            </div>
+            <h3 class="m-0 font-[Public_Sans] text-xl font-black text-black">{step.title}</h3>
+            <p class="m-0 text-base leading-7 text-[#45464d]">{step.copy}</p>
+          </article>
+        {/each}
+      </div>
+
+      <div class="mt-12 flex justify-center">
+        <a
+          class="flex h-12 items-center justify-center rounded-lg bg-emerald-700 px-8 text-sm font-black text-white no-underline shadow-sm transition hover:bg-emerald-800"
+          href="/signup?next=%2Fdashboard%2Fpersona"
+        >
+          Start Building Your Profile
+        </a>
+      </div>
+    </section>
+
+    <section id="pricing" class="mx-auto mb-16 w-full max-w-[1280px] px-4 md:px-6">
+      <div class="rounded-xl border border-[#c6c6cd] bg-white p-6 shadow-sm md:p-8">
+        <div class="grid gap-6 md:grid-cols-[1fr_auto] md:items-center">
+          <div>
+            <p class="m-0 mb-2 text-xs font-black uppercase tracking-normal text-emerald-700">Pricing</p>
+            <h2 class="m-0 font-[Public_Sans] text-3xl font-black leading-tight text-[#191c1e]">Start with the workspace you already have.</h2>
+            <p class="m-0 mt-3 max-w-3xl text-base leading-7 text-[#45464d]">
+              Use FundRadar to create your profile, browse grants, and review ranked matches. Account-based persistence is powered by Supabase.
+            </p>
+          </div>
+          <a
+            class="flex h-12 items-center justify-center rounded-lg border border-[#c6c6cd] px-6 text-sm font-black text-[#191c1e] no-underline transition hover:bg-[#eceef0]"
+            href="/login?next=%2Fdashboard"
+          >
+            View Dashboard
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="mt-auto w-full border-t border-[#e0e3e5] bg-white py-8">
+    <div class="mx-auto flex max-w-[1280px] flex-col items-center justify-between gap-4 px-4 md:flex-row md:px-6">
+      <a class="flex items-center gap-2 text-[#191c1e] no-underline" href="/" aria-label="FundRadar home">
+        <span
+          class="material-symbols-outlined flex size-6 items-center justify-center text-[22px] text-emerald-700"
+          style="font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 24;"
+          aria-hidden="true"
+        >
+          radar
+        </span>
+        <span class="font-[Public_Sans] text-sm font-black">FundRadar</span>
+      </a>
+      <p class="m-0 text-sm text-[#45464d]">2026 FundRadar. All rights reserved.</p>
+    </div>
+  </footer>
 </div>
-
-<style>
-  .fundradar-dashboard {
-    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  }
-
-  .material-symbols-outlined {
-    font-family: "Material Symbols Outlined";
-    font-weight: normal;
-    font-style: normal;
-    line-height: 1;
-    letter-spacing: normal;
-    text-transform: none;
-    display: inline-block;
-    white-space: nowrap;
-    overflow-wrap: normal;
-    direction: ltr;
-    font-feature-settings: "liga";
-    -webkit-font-feature-settings: "liga";
-    -webkit-font-smoothing: antialiased;
-    font-variation-settings:
-      "FILL" 0,
-      "wght" 400,
-      "GRAD" 0,
-      "opsz" 24;
-  }
-</style>

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import WorkspaceSidebar from '$lib/WorkspaceSidebar.svelte';
+  import WorkspaceTopbar from '$lib/WorkspaceTopbar.svelte';
   import { browser } from '$app/environment';
   import { pushState } from '$app/navigation';
   import { hydrateCachedGrantsResult } from '$lib/client/funding-cache';
@@ -201,13 +203,13 @@
   }
 
   function grantsRoute(count: number): string {
-    return `/grants-contributions?count=${count}`;
+    return `/dashboard/discovery?count=${count}`;
   }
 </script>
 
 <svelte:head>
-  <title>Grants and Contributions | FundRadar</title>
-  <meta name="description" content="Browse grants and contributions records in FundRadar." />
+  <title>Discovery | FundRadar</title>
+  <meta name="description" content="Browse grant discovery records in FundRadar." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
   <link
@@ -216,119 +218,45 @@
   />
 </svelte:head>
 
-<div class="fundradar-dashboard flex h-screen overflow-hidden bg-[#f7f9fb] text-[#191c1e]">
-  <nav class="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-slate-50 md:flex" aria-label="Workspace navigation">
-    <div class="flex h-full flex-col gap-2 p-4">
-      <div class="mb-4 flex items-center gap-3 px-2 py-4">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-600 font-bold text-white">FR</div>
-        <div>
-          <h1 class="m-0 font-[Public_Sans] text-xl font-black leading-none tracking-normal text-slate-900">FundRadar</h1>
-          <span class="text-xs text-slate-500">Enterprise Funding</span>
-        </div>
-      </div>
-
-      <div class="flex flex-1 flex-col gap-1">
-        <a class="flex items-center gap-3 rounded-md bg-emerald-50 px-3 py-2.5 text-emerald-700" href="/dashboard" aria-current="page">
-          <span class="material-symbols-outlined text-emerald-600">explore</span>
-          <span>Discovery</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/live-view">
-          <span class="material-symbols-outlined">insert_chart</span>
-          <span>Analytics</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/persona">
-          <span class="material-symbols-outlined">business_center</span>
-          <span>Company Profile</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/persona/matches">
-          <span class="material-symbols-outlined">description</span>
-          <span>Opportunity Matches</span>
-        </a>
-        <a class="flex items-center gap-3 rounded-md px-3 py-2.5 text-slate-600 hover:bg-slate-200 hover:text-slate-900" href="/settings">
-          <span class="material-symbols-outlined">settings</span>
-          <span>Settings</span>
-        </a>
-      </div>
-
-      <div class="my-4 px-2">
-        <a class="block w-full rounded-lg bg-emerald-600 py-2.5 text-center font-semibold text-white hover:bg-emerald-700" href="/persona/matches">
-          Find Funding
-        </a>
-      </div>
-    </div>
-  </nav>
+<div class="flex h-screen overflow-hidden bg-[#f7f9fb] font-[Inter,ui-sans-serif,system-ui,sans-serif] text-[#191c1e]">
+  <WorkspaceSidebar active="discovery" />
 
   <div class="relative flex h-screen min-w-0 flex-1 flex-col bg-[#f7f9fb]">
-    <header class="sticky top-0 z-40 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 py-3 shadow-sm">
-      <div class="flex max-w-md flex-1 items-center">
-        <div class="relative hidden w-full md:block">
-          <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-slate-400">search</span>
-          <span class="block w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-sm text-slate-500">
-            Grants and contributions records
-          </span>
-        </div>
-        <span class="block text-lg font-bold text-slate-900 md:hidden">FundRadar</span>
-      </div>
-
-      <div class="ml-4 flex items-center gap-2 md:gap-4">
-        <a class="hidden rounded-lg border border-[#c6c6cd] px-4 py-2 text-sm font-semibold text-[#191c1e] transition hover:bg-[#eceef0] sm:inline-flex" href="/live-view">
-          Analytics
-        </a>
-        <button class="rounded-full p-2 text-emerald-600 transition hover:bg-slate-50" type="button" aria-label="Notifications">
-          <span class="material-symbols-outlined">notifications</span>
-        </button>
-        <button class="rounded-full p-2 text-emerald-600 transition hover:bg-slate-50" type="button" aria-label="Help">
-          <span class="material-symbols-outlined">help_outline</span>
-        </button>
-        <div class="ml-2 flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-emerald-700 text-xs font-black text-white">
-          FR
-        </div>
-      </div>
-    </header>
+    <WorkspaceTopbar placeholder="Search grants, programs, or workspace pages..." />
 
     <main class="flex-1 overflow-y-auto p-4 md:p-6">
       <div class="mx-auto max-w-[1440px]">
         <section class="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end" aria-labelledby="grants-heading">
           <div>
-            <p class="m-0 mb-2 text-xs font-semibold uppercase tracking-normal text-emerald-700">Dataset Route</p>
+            <p class="m-0 mb-2 text-xs font-semibold uppercase tracking-normal text-emerald-700">Discovery</p>
             <h2 id="grants-heading" class="m-0 mb-2 font-[Public_Sans] text-4xl font-semibold leading-tight tracking-normal text-[#191c1e]">
-              Grants and Contributions
+              Discovery
             </h2>
             <p class="m-0 max-w-2xl text-base leading-6 text-[#45464d]">
-              Review grants and contributions independently from Business Benefits Finder records.
+              Review grants and contributions in the same FundRadar workspace theme.
             </p>
           </div>
 
-          <dl class="grid grid-cols-2 gap-3" aria-label="Grant record counts">
-            <div class="rounded-xl border border-[#c6c6cd] bg-white px-4 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.03)]">
-              <dt class="text-xs font-semibold uppercase tracking-normal text-[#45464d]">Requested</dt>
-              <dd class="m-0 mt-1 font-[Public_Sans] text-2xl font-semibold text-[#191c1e]">{formatCount(data.grantsResult.requested)}</dd>
-            </div>
-            <div class="rounded-xl border border-[#c6c6cd] bg-white px-4 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.03)]">
-              <dt class="text-xs font-semibold uppercase tracking-normal text-[#45464d]">Total records</dt>
-              <dd class="m-0 mt-1 font-[Public_Sans] text-2xl font-semibold text-[#191c1e]">{formatCount(data.grantsResult.total)}</dd>
-            </div>
-          </dl>
         </section>
 
         <section class="rounded-xl border border-[#c6c6cd] bg-white shadow-[0_4px_20px_rgba(0,0,0,0.03)]">
           <div class="flex flex-col justify-between gap-4 border-b border-[#c6c6cd] p-5 md:flex-row md:items-end">
             <div>
-              <h3 class="m-0 text-2xl font-semibold leading-tight text-[#191c1e]">Loaded grant records</h3>
+              <h3 class="m-0 text-2xl font-semibold leading-tight text-[#191c1e]">Grant records</h3>
               <p class="m-0 mt-2 max-w-2xl text-sm leading-6 text-[#45464d]">
-                Source: <span class="break-words font-semibold text-[#191c1e]">{data.grantsResult.endpoint}</span>
+                Browse grants and expand the list when you need more coverage.
               </p>
             </div>
             <span class="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">
-              {cacheHydrated && !loadingGrants ? 'Synced' : 'Loading'}
+              {cacheHydrated && !loadingGrants ? 'Ready' : 'Loading'}
             </span>
           </div>
 
           <div class="p-5">
             {#if !cacheHydrated}
               <section class="rounded-xl border border-[#c6c6cd] bg-white p-8 text-center" role="status">
-                <h3 class="m-0 text-lg font-semibold text-[#191c1e]">Loading cached grants</h3>
-                <p class="m-0 mt-2 text-sm leading-6 text-[#45464d]">Checking local storage before contacting the backend.</p>
+                <h3 class="m-0 text-lg font-semibold text-[#191c1e]">Loading grants</h3>
+                <p class="m-0 mt-2 text-sm leading-6 text-[#45464d]">Preparing the latest saved grant records.</p>
               </section>
             {:else if data.grantsResult.error}
               <section class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900" role="status">
@@ -338,7 +266,7 @@
             {:else if visibleGrantRecords.length === 0}
               <section class="rounded-xl border border-[#c6c6cd] bg-white p-8 text-center" role="status">
                 <h3 class="m-0 text-lg font-semibold text-[#191c1e]">No grants returned</h3>
-                <p class="m-0 mt-2 text-sm leading-6 text-[#45464d]">The grants endpoint returned an empty record set.</p>
+                <p class="m-0 mt-2 text-sm leading-6 text-[#45464d]">No grants are available for this selection.</p>
               </section>
             {:else}
               <section class="grid grid-cols-1 gap-4 md:grid-cols-2" aria-label="Grant records">
@@ -356,7 +284,6 @@
                       </div>
                       <div class="shrink-0 text-right">
                         <strong class="block font-[Public_Sans] text-2xl font-semibold text-[#191c1e]">{formatMoney(grant.agreement_value)}</strong>
-                        <span class="text-xs font-semibold uppercase tracking-normal text-[#45464d]">Loaded</span>
                       </div>
                     </div>
 
@@ -392,9 +319,9 @@
                   >
                     {loadingGrants ? 'Loading more grants' : 'Load more grants'}
                   </button>
-                  <p class="m-0 text-sm leading-6 text-[#45464d]">Loads {formatCount(nextGrantsCount)} grant records on this route.</p>
+                  <p class="m-0 text-sm leading-6 text-[#45464d]">Request more grant records.</p>
                 {:else}
-                  <p class="m-0 text-sm leading-6 text-[#45464d]">Grant count is at the maximum of {formatCount(data.limits.maxCount)}.</p>
+                  <p class="m-0 text-sm leading-6 text-[#45464d]">The grant record window is at its limit.</p>
                 {/if}
               </div>
             {/if}
@@ -404,30 +331,3 @@
     </main>
   </div>
 </div>
-
-<style>
-  .fundradar-dashboard {
-    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  }
-
-  .material-symbols-outlined {
-    display: inline-block;
-    overflow-wrap: normal;
-    direction: ltr;
-    font-family: "Material Symbols Outlined";
-    font-feature-settings: "liga";
-    font-style: normal;
-    font-variation-settings:
-      "FILL" 0,
-      "wght" 400,
-      "GRAD" 0,
-      "opsz" 24;
-    font-weight: normal;
-    letter-spacing: normal;
-    line-height: 1;
-    text-transform: none;
-    white-space: nowrap;
-    -webkit-font-feature-settings: "liga";
-    -webkit-font-smoothing: antialiased;
-  }
-</style>

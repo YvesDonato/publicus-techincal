@@ -1,6 +1,8 @@
 <script lang="ts">
+  import WorkspaceSidebar from '$lib/WorkspaceSidebar.svelte';
+  import WorkspaceTopbar from '$lib/WorkspaceTopbar.svelte';
   import { browser } from '$app/environment';
-  import { hydrateCachedGrantsResult } from '$lib/client/funding-cache';
+  import { hydrateCachedGrantsResult, readCachedGrantsResult, type CachedGrantsResult } from '$lib/client/funding-cache';
   import { onMount } from 'svelte';
 
   type SortMode = 'score' | 'amount' | 'newest';
@@ -51,6 +53,24 @@
   const DEFAULT_BACKEND_API_URL = 'http://127.0.0.1:8000';
   const DEFAULT_COUNT = 10;
   const MAX_COUNT = 100;
+  const pageShellClass =
+    'flex h-screen overflow-hidden bg-[#f7f9fb] font-[Inter,ui-sans-serif,system-ui,sans-serif] text-[#191c1e]';
+  const profileCanvasClass = 'mx-auto w-full max-w-[1280px] px-6 py-12 max-md:px-4 max-md:py-7';
+  const profileIntroClass = 'mb-12 flex items-end justify-between gap-6 max-lg:grid max-lg:items-start max-md:mb-7';
+  const sortLinkClass =
+    'rounded-full px-3.5 py-2.5 text-sm leading-none font-extrabold text-[#191c1e] no-underline hover:bg-[#f2f4f6] focus-visible:bg-[#f2f4f6]';
+  const sortLinkActiveClass = 'rounded-full bg-[#006c49] px-3.5 py-2.5 text-sm leading-none font-extrabold text-white no-underline';
+  const filterFieldClass = 'grid gap-2 text-sm font-bold text-[#25302a]';
+  const filterInputClass =
+    'min-h-[42px] w-full rounded-lg border border-[#bec9c1] bg-white px-3 py-2 font-medium leading-[1.4] text-[#172026] focus:border-emerald-700 focus:outline-[3px] focus:outline-offset-2 focus:outline-emerald-200';
+  const primaryButtonClass =
+    'inline-flex items-center justify-center rounded-lg border border-emerald-800 bg-emerald-800 px-3.5 py-3 leading-none font-extrabold text-white no-underline hover:bg-emerald-900 focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-emerald-200';
+  const secondaryButtonClass =
+    'inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3.5 py-3 leading-none font-extrabold text-emerald-800 no-underline hover:bg-emerald-50 focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-emerald-200';
+  const compactButtonClass = `${secondaryButtonClass} min-h-9 px-3 py-2 text-sm`;
+  const statePanelClass = 'mt-6 rounded-lg border border-[#d6d0bf] bg-[#fffdf6] p-6';
+  const eyebrowClass = 'm-0 mb-3 text-xs font-bold tracking-normal text-emerald-700 uppercase';
+  const cardShadowClass = 'shadow-[0_4px_20px_rgba(0,0,0,0.03)]';
 
   let props = $props<{ data?: Partial<PersonaData> }>();
   let clientData = $state<PersonaData | null>(null);
@@ -317,13 +337,19 @@
   }
 
   onMount(() => {
-    persona = readStoredPersona() ?? createDefaultPersona();
-    profileHydrated = true;
+    void hydrateProfile();
     savedGrantRefs = readSavedGrantRefs();
     shortlistHydrated = true;
 
-    void hydratePersonaGrants();
+    if (!hydratePersonaGrantsFromCache()) {
+      void hydratePersonaGrants();
+    }
   });
+
+  async function hydrateProfile() {
+    persona = (await readServerPersona()) ?? readStoredPersona() ?? createDefaultPersona();
+    profileHydrated = true;
+  }
 
   async function hydratePersonaGrants() {
     const endpoint = data.grantsQuery?.endpoint;
@@ -334,6 +360,30 @@
     }
 
     const result = await hydrateCachedGrantsResult(endpoint, data.requested);
+    applyPersonaGrantsResult(result);
+    grantsHydrated = true;
+  }
+
+  function hydratePersonaGrantsFromCache(): boolean {
+    const endpoint = data.grantsQuery?.endpoint;
+
+    if (!endpoint) {
+      grantsHydrated = true;
+      return true;
+    }
+
+    const cached = readCachedGrantsResult(endpoint, data.requested);
+
+    if (!cached) {
+      return false;
+    }
+
+    applyPersonaGrantsResult(cached);
+    grantsHydrated = true;
+    return true;
+  }
+
+  function applyPersonaGrantsResult(result: CachedGrantsResult) {
     clientData = {
       ...data,
       grants: result.records as GrantRecord[],
@@ -341,7 +391,6 @@
       requested: result.requested,
       error: result.error
     };
-    grantsHydrated = true;
   }
 
   $effect(() => {
@@ -349,7 +398,6 @@
       return;
     }
 
-    persistPersona(persona);
     profileSaved = false;
   });
 
@@ -688,19 +736,7 @@
     return typeof value === 'string' ? value : fallback;
   }
 
-  function readStoredPersona(): CompanyPersona | null {
-    if (!browser) {
-      return null;
-    }
-
-    try {
-      const rawValue = localStorage.getItem(PROFILE_STORAGE_KEY);
-      const parsed = rawValue ? JSON.parse(rawValue) : null;
-
-      if (!isRecord(parsed)) {
-        return null;
-      }
-
+  function readPersonaRecord(parsed: Record<string, unknown>): CompanyPersona {
       const defaults = createDefaultPersona();
       const activities = isRecord(parsed.activities) ? parsed.activities : {};
       const companyType = readStringField(parsed, 'companyType', defaults.companyType);
@@ -731,24 +767,74 @@
           sustainability: activities.sustainability === true
         }
       };
+  }
+
+  async function readServerPersona(): Promise<CompanyPersona | null> {
+    if (!browser) {
+      return null;
+    }
+
+    try {
+      const response = await fetch('/dashboard/persona/profile');
+      if (!response.ok) {
+        return null;
+      }
+
+      const payload: unknown = await response.json();
+      if (!isRecord(payload) || !isRecord(payload.profile)) {
+        return null;
+      }
+
+      return readPersonaRecord(payload.profile);
     } catch {
       return null;
     }
   }
 
-  function persistPersona(profile: CompanyPersona) {
+  function readStoredPersona(): CompanyPersona | null {
+    if (!browser) {
+      return null;
+    }
+
     try {
-      localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+      const rawValue = localStorage.getItem(PROFILE_STORAGE_KEY);
+      const parsed = rawValue ? JSON.parse(rawValue) : null;
+
+      if (!isRecord(parsed)) {
+        return null;
+      }
+
+      return readPersonaRecord(parsed);
+    } catch {
+      return null;
+    }
+  }
+
+  async function saveServerPersona(profile: CompanyPersona) {
+    const response = await fetch('/dashboard/persona/profile', {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(profile)
+    });
+
+    if (!response.ok) {
+      throw new Error('Could not save company profile.');
+    }
+
+    try {
+      localStorage.removeItem(PROFILE_STORAGE_KEY);
     } catch {
       // localStorage can be unavailable in private windows or locked-down browsers.
     }
   }
 
-  function saveAndContinue() {
+  async function saveAndContinue() {
     if (browser) {
-      persistPersona(persona);
+      await saveServerPersona(persona);
       profileSaved = true;
-      window.location.href = '/persona/matches';
+      document.getElementById('recommendations-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }
 
@@ -826,10 +912,10 @@
     const sortLabel = getSortLabel(data.filters.sort);
 
     if (grantsQuery?.mode === 'calendar-year' && grantsQuery.year !== null) {
-      return `Calendar year ${grantsQuery.year}, ${sortLabel}, ${data.requested} requested.`;
+      return `Calendar year ${grantsQuery.year}, sorted by ${sortLabel}.`;
     }
 
-    return `First ${data.requested} grants, ${sortLabel}.`;
+    return `Sorted by ${sortLabel}.`;
   }
 
   function getTotalMatchedCapital(matches: GrantMatch[]): number {
@@ -921,6 +1007,36 @@
     return Math.max(0, Math.min(100, 100 - score));
   }
 
+  function getCompletenessWidthClass(value: number): string {
+    if (value >= 100) return 'w-full';
+    if (value >= 92) return 'w-11/12';
+    if (value >= 83) return 'w-10/12';
+    if (value >= 75) return 'w-9/12';
+    if (value >= 67) return 'w-8/12';
+    if (value >= 58) return 'w-7/12';
+    if (value >= 50) return 'w-6/12';
+    if (value >= 42) return 'w-5/12';
+    if (value >= 33) return 'w-4/12';
+    if (value >= 25) return 'w-3/12';
+    if (value >= 17) return 'w-2/12';
+    if (value > 0) return 'w-1/12';
+    return 'w-0';
+  }
+
+  function getMatchStrokeClass(score: number): string {
+    const tone = getMatchTone(score);
+
+    if (tone === 'review') {
+      return 'text-amber-600';
+    }
+
+    if (tone === 'low') {
+      return 'text-slate-500';
+    }
+
+    return 'text-emerald-700';
+  }
+
   function getInsightSignals(match: GrantMatch): string[] {
     return (match.reasons.length > 0 ? match.reasons : match.nextActions).slice(0, 3);
   }
@@ -935,13 +1051,13 @@
       params.set('year', data.filters.year.toString());
     }
 
-    return `/persona?${params.toString()}`;
+    return `/dashboard/persona/matches?${params.toString()}`;
   }
 </script>
 
 <svelte:head>
-  <title>Company Profile | FundRadar</title>
-  <meta name="description" content="Build a company profile and rank grant opportunities with FundRadar." />
+  <title>Opportunity Matches | FundRadar</title>
+  <meta name="description" content="Review ranked grant opportunities and saved applications with FundRadar." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
   <link
@@ -950,292 +1066,358 @@
   />
 </svelte:head>
 
-<main class="profile-app-shell">
-  <aside class="profile-sidebar" aria-label="FundRadar workspace navigation">
-    <div class="profile-sidebar__brand">
-      <div class="profile-logo" aria-hidden="true">FR</div>
-      <div>
-        <h1>FundRadar</h1>
-        <p>Enterprise Funding</p>
-      </div>
-    </div>
+<div class={pageShellClass}>
+  <WorkspaceSidebar active="matches" />
 
-    <a class="profile-primary-action" href="/persona/matches">
-      <span class="material-symbols-outlined" aria-hidden="true">search</span>
-      Find Funding
-    </a>
+  <div class="relative flex h-screen min-w-0 flex-1 flex-col bg-[#f7f9fb]">
+    <WorkspaceTopbar placeholder="Search profile, keywords, or opportunities..." />
 
-    <nav class="profile-nav" aria-label="Profile navigation">
-      <a href="/dashboard">
-        <span class="material-symbols-outlined" aria-hidden="true">explore</span>
-        <span class="profile-nav-label">Discovery</span>
-      </a>
-      <a class="profile-nav__active" href="/persona" aria-current="page">
-        <span class="material-symbols-outlined" aria-hidden="true">business_center</span>
-        <span class="profile-nav-label">Company Profile</span>
-      </a>
-      <a href="/live-view">
-        <span class="material-symbols-outlined" aria-hidden="true">insert_chart</span>
-        <span class="profile-nav-label">Analytics</span>
-      </a>
-      <a href="/persona/matches">
-        <span class="material-symbols-outlined" aria-hidden="true">description</span>
-        <span class="profile-nav-label">Opportunity Matches</span>
-      </a>
-      <a href="/settings">
-        <span class="material-symbols-outlined" aria-hidden="true">settings</span>
-        <span class="profile-nav-label">Settings</span>
-      </a>
-    </nav>
-
-    <div class="profile-sidebar__footer">
-      <a href="/">
-        <span class="material-symbols-outlined" aria-hidden="true">contact_support</span>
-        <span class="profile-nav-label">Support</span>
-      </a>
-      <a href="/">
-        <span class="material-symbols-outlined" aria-hidden="true">logout</span>
-        <span class="profile-nav-label">Log Out</span>
-      </a>
-    </div>
-  </aside>
-
-  <section class="profile-workspace" aria-label="Company profile workspace">
-    <header class="profile-topbar">
-      <label class="profile-search">
-        <span class="material-symbols-outlined" aria-hidden="true">search</span>
-        <input placeholder="Search profile, keywords, or opportunities..." type="search" />
-      </label>
-
-      <div class="profile-topbar__actions">
-        <button aria-label="Notifications" class="profile-icon-button" type="button">
-          <span class="material-symbols-outlined" aria-hidden="true">notifications</span>
-        </button>
-        <button aria-label="Help" class="profile-icon-button" type="button">
-          <span class="material-symbols-outlined" aria-hidden="true">help_outline</span>
-        </button>
-        <div class="profile-avatar" aria-label="User profile">FR</div>
-      </div>
-    </header>
-
-    <div class="profile-canvas">
-      <section class="profile-page-intro">
+    <main class="flex-1 overflow-y-auto">
+      <div class={profileCanvasClass}>
+      <section class={profileIntroClass}>
         <div>
-          <h2 id="company-profile-heading">Company Profile</h2>
-          <p>
-            Complete your organization profile before reviewing ranked opportunity matches.
+          <h2 id="matches-page-heading" class="m-0 text-4xl leading-tight text-[#191c1e] max-md:text-3xl">Opportunity Matches</h2>
+          <p class="mt-2 max-w-[66ch] leading-7 text-[#45464d]">
+            Review ranked opportunities and manage saved applications for {applicantName}.
           </p>
         </div>
-
-        <ol class="profile-stepper" aria-label="Profile setup progress">
-          <li class="profile-step profile-step--active"><span>1</span>Profile</li>
-          <li class="profile-step"><span>2</span><a href="/persona/matches">Matches</a></li>
-          <li class="profile-step"><span>3</span><a href="/persona/matches#shortlist-heading">Shortlist</a></li>
-        </ol>
       </section>
 
-      <section class="profile-builder company-profile-unified" aria-labelledby="company-heading">
-        <section class="profile-card profile-card--wide profile-card--identity" aria-labelledby="company-heading">
-          <div class="profile-card__header">
-            <span class="profile-card-icon" aria-hidden="true">ID</span>
-            <div>
-              <h3 id="company-heading">Core Identity</h3>
-              <p>Your official registered business information.</p>
-            </div>
+      <section class="grid grid-cols-12 gap-6 max-lg:grid-cols-1" aria-labelledby="matches-heading">
+        <section class="col-span-full grid gap-5" id="recommendations-panel" aria-labelledby="matches-heading">
+        <div class="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-6 max-[760px]:grid-cols-1">
+          <div>
+            <p class={eyebrowClass}>FundRadar discovery</p>
+            <h2 id="matches-heading" class="m-0 text-3xl leading-tight text-[#191c1e]">Opportunity Matches</h2>
+            <p class="mt-2 max-w-[72ch] leading-7 text-[#45464d]">
+              Based on {applicantName}'s profile, FundRadar ranked grants by fit, funding size,
+              location, and profile keyword signals.
+            </p>
+            <p class="mt-4 break-words text-sm text-[#52615c]">{getGrantQuerySummary()}</p>
           </div>
 
-          <div class="profile-field-grid">
-            <label class="profile-field">
-              <span>Legal Entity Name</span>
-              <input bind:value={persona.legalEntityName} name="legal-entity-name" placeholder="Acme Innovations Inc." />
-            </label>
-
-            <label class="profile-field">
-              <span>Doing Business As</span>
-              <input bind:value={persona.doingBusinessAs} name="doing-business-as" placeholder="Acme Tech" />
-            </label>
-
-            <label class="profile-field">
-              <span>Website</span>
-              <input bind:value={persona.website} name="website" placeholder="https://example.com" type="url" />
-            </label>
-
-            <label class="profile-field">
-              <span>Applicant Type</span>
-              <select bind:value={persona.companyType} name="company-type">
-                {#each companyTypes as companyType (companyType.value)}
-                  <option value={companyType.value}>{companyType.label}</option>
-                {/each}
-              </select>
-            </label>
-
-            <label class="profile-field">
-              <span>Business Number (CRA)</span>
-              <input
-                bind:value={persona.businessNumber}
-                class="profile-field__mono"
-                name="business-number"
-                placeholder="123456789 RT0001"
-              />
-            </label>
-
-            <label class="profile-field">
-              <span>Date of Incorporation</span>
-              <input bind:value={persona.incorporationDate} name="incorporation-date" type="date" />
-            </label>
+          <div class="flex flex-wrap items-center gap-1.5 rounded-full border border-slate-200 bg-white p-1.5" aria-label="Sort opportunities">
+            <span class="px-2 text-xs font-bold text-[#45464d] uppercase">Sort by</span>
+            <a class={data.filters.sort === 'score' ? sortLinkActiveClass : sortLinkClass} href={getSortHref('score')}>
+              Relevance
+            </a>
+            <a class={data.filters.sort === 'amount' ? sortLinkActiveClass : sortLinkClass} href={getSortHref('amount')}>
+              Amount
+            </a>
+            <a class={data.filters.sort === 'newest' ? sortLinkActiveClass : sortLinkClass} href={getSortHref('newest')}>
+              Deadline
+            </a>
           </div>
-        </section>
+        </div>
 
-        <div class="profile-card-stack">
-          <section class="profile-card" aria-labelledby="jurisdiction-heading">
-            <div class="profile-card__header">
-              <span class="profile-card-icon" aria-hidden="true">ON</span>
-              <div>
-                <h3 id="jurisdiction-heading">Jurisdiction</h3>
-                <p>Primary operational headquarters.</p>
+        <form class="grid grid-cols-[minmax(120px,0.8fr)_minmax(110px,0.7fr)_auto] items-end gap-3 rounded-lg border border-slate-200 bg-white p-4 max-lg:grid-cols-2 max-md:grid-cols-1" method="GET" aria-label="Company grant filters">
+          <label class={filterFieldClass}>
+            <span>Year</span>
+            <input
+              class={filterInputClass}
+              max="2200"
+              min="1800"
+              name="year"
+              oninput={(event) => {
+                selectedYear = event.currentTarget.value;
+              }}
+              placeholder="Any"
+              type="number"
+              value={activeYear}
+            />
+          </label>
+
+          <label class={filterFieldClass}>
+            <span>Count</span>
+            <input
+              class={filterInputClass}
+              max="100"
+              min="1"
+              name="count"
+              oninput={(event) => {
+                selectedCount = event.currentTarget.value;
+              }}
+              type="number"
+              value={activeCount}
+            />
+          </label>
+
+          <div class="flex flex-wrap gap-2 max-md:grid">
+            <button class={primaryButtonClass} type="submit">Apply</button>
+            <a class={secondaryButtonClass} href="/dashboard/persona/matches">Reset filters</a>
+          </div>
+        </form>
+
+        <section>
+          <div class="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white p-4" aria-label="Grant match controls">
+            <label class="flex min-w-0 items-center gap-2 text-sm font-bold text-[#25302a]">
+              <input class="h-4 w-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-700" bind:checked={likelyOnly} type="checkbox" />
+              <span>Likely matches only</span>
+            </label>
+
+            <dl class="m-0 flex flex-wrap gap-2.5">
+              <div class="grid min-w-20 rounded-lg bg-[#f2f4f6] px-3 py-2">
+                <dt class="text-[11px] font-black text-[#45464d] uppercase">Likely</dt>
+                <dd class="m-0 text-lg font-black text-[#006c49]">{likelyMatchCount}</dd>
               </div>
-            </div>
-
-            <div class="profile-field-grid profile-field-grid--single">
-              <label class="profile-field">
-                <span>Province / Territory</span>
-                <select bind:value={persona.province} name="province">
-                  <option value="">Select Region</option>
-                  {#each provinceOptions as province (province.value)}
-                    <option value={province.value}>{province.label}</option>
-                  {/each}
-                </select>
-              </label>
-
-              <label class="profile-field">
-                <span>City</span>
-                <input bind:value={persona.city} name="city" placeholder="Ottawa" />
-              </label>
-            </div>
-          </section>
-
-          <section class="profile-card profile-card--scale" aria-labelledby="scale-heading">
-            <div class="profile-card__header">
-              <span class="profile-card-icon" aria-hidden="true">FTE</span>
-              <div>
-                <h3 id="scale-heading">Organization Scale</h3>
-                <p>Current full-time equivalent employees.</p>
+              <div class="grid min-w-20 rounded-lg bg-[#f2f4f6] px-3 py-2">
+                <dt class="text-[11px] font-black text-[#45464d] uppercase">Saved</dt>
+                <dd class="m-0 text-lg font-black text-[#006c49]">{savedGrantRefs.length}</dd>
               </div>
-            </div>
+            </dl>
+          </div>
 
-            <div class="profile-choice-grid">
-              {#each employeeOptions as option (option.value)}
-                <label class="profile-choice">
-                  <input
-                    checked={persona.employeeRange === option.value}
-                    name="employees"
-                    type="radio"
-                    value={option.value}
-                    onchange={() => {
-                      persona.employeeRange = option.value;
-                    }}
-                  />
-                  <span>{option.label}</span>
-                </label>
+          {#if !grantsHydrated}
+            <section class={statePanelClass} role="status">
+              <h2 class="m-0 text-xl leading-snug text-[#191c1e]">Loading opportunities</h2>
+              <p class="mt-2 text-sm leading-6 text-[#45464d]">Preparing the latest saved opportunity records.</p>
+            </section>
+          {:else if data.error}
+            <section class={statePanelClass} role="status">
+              <h2 class="m-0 text-xl leading-snug text-[#191c1e]">Opportunities unavailable</h2>
+              <p class="mt-2 text-sm leading-6 text-[#45464d]">{data.error}</p>
+            </section>
+          {:else if data.grants.length === 0}
+            <section class={statePanelClass} role="status">
+              <h2 class="m-0 text-xl leading-snug text-[#191c1e]">No grants returned</h2>
+              <p class="mt-2 text-sm leading-6 text-[#45464d]">No grants are available for this selection.</p>
+            </section>
+          {:else if visibleGrantMatches.length === 0}
+            <section class={statePanelClass} role="status">
+              <h2 class="m-0 text-xl leading-snug text-[#191c1e]">No likely matches yet</h2>
+              <p class="mt-2 text-sm leading-6 text-[#45464d]">Broaden the company keywords or turn off the likely-only filter to review all grants.</p>
+            </section>
+          {:else}
+            <section class="grid grid-cols-12 gap-6" aria-label="Ranked opportunity matches">
+              {#if topOpportunity}
+                {@const topGrantRef = getGrantRef(topOpportunity.grant)}
+                {@const topGrantSaved = topGrantRef ? savedGrantRefSet.has(topGrantRef) : false}
+                <article class="col-span-8 grid min-h-[360px] grid-cols-[minmax(0,1fr)_260px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_4px_20px_rgba(0,0,0,0.03)] max-[1080px]:col-span-full max-[1080px]:grid-cols-[minmax(0,1fr)_230px] max-[760px]:grid-cols-1">
+                  <div class="grid gap-4 p-7">
+                    <div class="flex flex-wrap gap-1.5">
+                      {#each getOpportunityTags(topOpportunity) as tag (tag)}
+                        <span class="rounded-full bg-[#eceef0] px-2.5 py-1.5 text-xs leading-none font-black text-[#45464d] uppercase first:bg-[#131b2e] first:text-[#dae2fd]">{tag}</span>
+                      {/each}
+                    </div>
+
+                    <h3 class="m-0 text-3xl leading-tight text-[#191c1e]">{getOpportunityTitle(topOpportunity)}</h3>
+                    <p class="m-0 text-sm font-black text-[#006c49] uppercase">{getOpportunitySponsor(topOpportunity)}</p>
+                    <p class="m-0 leading-7 text-[#45464d]">{getOpportunityDescription(topOpportunity)}</p>
+
+                    <div class="mt-auto flex items-end justify-between gap-4 border-t border-slate-200 pt-4 max-[760px]:grid max-[760px]:items-stretch">
+                      <div>
+                        <p class="m-0 text-xs font-black text-[#45464d] uppercase">Potential funding</p>
+                        <strong class="mt-1 block text-2xl text-[#006c49]">{getFundingLabel(topOpportunity)}</strong>
+                      </div>
+                      <button
+                        aria-pressed={topGrantSaved}
+                        class={`rounded-lg border px-4 py-3 leading-none font-black text-white disabled:cursor-not-allowed disabled:border-[#c6c6cd] disabled:bg-[#eceef0] disabled:text-[#76777d] ${
+                          topGrantSaved ? 'border-[#131b2e] bg-[#131b2e]' : 'border-emerald-700 bg-emerald-700 hover:bg-emerald-800'
+                        }`}
+                        disabled={!topGrantRef}
+                        type="button"
+                        onclick={() => toggleGrantSaved(topOpportunity.grant)}
+                      >
+                        {topGrantSaved ? 'Saved' : 'Save opportunity'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <aside class="grid place-items-center content-center gap-3.5 border-l border-slate-200 bg-[#f2f4f6] p-7 max-[760px]:border-t max-[760px]:border-l-0">
+                    <div class={`relative grid h-[140px] w-[140px] place-items-center ${getMatchStrokeClass(topOpportunity.matchScore)}`} aria-label={`${topOpportunity.matchScore} percent match`}>
+                      <svg class="absolute inset-0 h-full w-full -rotate-90" aria-hidden="true" viewBox="0 0 100 100">
+                        <circle class="fill-none stroke-slate-200 [stroke-width:8]" cx="50" cy="50" r="42"></circle>
+                        <circle
+                          class="fill-none stroke-current [stroke-dasharray:100] [stroke-linecap:round] [stroke-width:8] transition-[stroke-dashoffset] duration-300"
+                          cx="50"
+                          cy="50"
+                          r="42"
+                          pathLength="100"
+                          stroke-dashoffset={getScoreOffset(topOpportunity.matchScore)}
+                        ></circle>
+                      </svg>
+                      <strong class="relative text-4xl leading-none text-[#191c1e]">{topOpportunity.matchScore}<span class="text-base">%</span></strong>
+                    </div>
+
+                    <p class="m-0 text-center text-sm font-black text-[#191c1e] uppercase">{getFitLabel(topOpportunity.matchScore)}</p>
+                    <ul class="m-0 grid list-none gap-2 p-0 text-sm leading-6 text-[#45464d]">
+                      {#each getInsightSignals(topOpportunity) as signal (signal)}
+                        <li class="relative pl-4 before:absolute before:left-0 before:text-emerald-700 before:content-['-']">{signal}</li>
+                      {/each}
+                    </ul>
+                  </aside>
+                </article>
+              {/if}
+
+              <aside class={`relative col-span-4 grid content-start gap-4 overflow-hidden rounded-lg border border-slate-200 bg-[#0b1c30] p-7 text-white ${cardShadowClass} max-[1080px]:col-span-full`}>
+                <h3 class="relative m-0 text-2xl leading-snug text-white">Profile Strength</h3>
+                <p class="relative m-0 leading-6 text-[#dae2fd]/80">Your profile is {personaCompleteness}% complete, which improves match confidence for available grants.</p>
+
+                <div class="relative grid gap-2 rounded-lg border border-white/10 bg-[#131b2e]/70 p-3.5">
+                  <span class="text-xs font-black text-[#dae2fd]/70 uppercase">Data points analyzed</span>
+                  <strong class="text-3xl">{data.grants.length}</strong>
+                  <div class="h-2 overflow-hidden rounded-full bg-white/15"><span class={`block h-full rounded-full bg-emerald-400 ${getCompletenessWidthClass(personaCompleteness)}`}></span></div>
+                </div>
+
+                <div class="relative grid gap-2 rounded-lg border border-white/10 bg-[#131b2e]/70 p-3.5">
+                  <span class="text-xs font-black text-[#dae2fd]/70 uppercase">Total matched capital</span>
+                  <strong class="text-3xl">{formatMoneyValue(totalMatchedCapital)}</strong>
+                </div>
+              </aside>
+
+              {#each remainingOpportunities as match (match.grant._id)}
+                {@const grantRef = getGrantRef(match.grant)}
+                {@const grantSaved = grantRef ? savedGrantRefSet.has(grantRef) : false}
+                <article class={`col-span-4 grid min-h-80 gap-4 rounded-lg border border-slate-200 bg-white p-6 ${cardShadowClass} transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] max-[1080px]:col-span-full`}>
+                  <div class="flex items-start justify-between gap-4">
+                    <div class="flex flex-wrap gap-1.5">
+                      {#each getOpportunityTags(match).slice(0, 2) as tag (tag)}
+                        <span class="rounded-full bg-[#eceef0] px-2.5 py-1.5 text-xs leading-none font-black text-[#45464d] uppercase first:bg-[#131b2e] first:text-[#dae2fd]">{tag}</span>
+                      {/each}
+                    </div>
+
+                    <div class={`relative grid h-14 w-14 shrink-0 place-items-center ${getMatchStrokeClass(match.matchScore)}`} aria-label={`${match.matchScore} percent match`}>
+                      <svg class="absolute inset-0 h-full w-full -rotate-90" aria-hidden="true" viewBox="0 0 40 40">
+                        <circle class="fill-none stroke-slate-200 [stroke-width:4]" cx="20" cy="20" r="16"></circle>
+                        <circle
+                          class="fill-none stroke-current [stroke-dasharray:100] [stroke-linecap:round] [stroke-width:4] transition-[stroke-dashoffset] duration-300"
+                          cx="20"
+                          cy="20"
+                          r="16"
+                          pathLength="100"
+                          stroke-dashoffset={getScoreOffset(match.matchScore)}
+                        ></circle>
+                      </svg>
+                      <strong class="relative text-xs font-black text-[#191c1e]">{match.matchScore}%</strong>
+                    </div>
+                  </div>
+
+                  <h3 class="m-0 text-xl leading-snug text-[#191c1e]">{getOpportunityTitle(match)}</h3>
+                  <p class="m-0 text-sm leading-6 text-[#45464d]">{getOpportunityDescription(match)}</p>
+
+                  <div class="mt-auto grid grid-cols-2 gap-3 border-t border-slate-200 pt-4">
+                    <div class="grid gap-1">
+                      <span class="text-[11px] font-black text-[#45464d] uppercase">Amount</span>
+                      <strong class="text-sm text-[#191c1e]">{getFundingLabel(match)}</strong>
+                    </div>
+                    <div class="grid gap-1">
+                      <span class="text-[11px] font-black text-[#45464d] uppercase">Deadline</span>
+                      <strong class="text-sm text-[#191c1e]">{getDeadlineLabel(match)}</strong>
+                    </div>
+                  </div>
+
+                  <button
+                    aria-pressed={grantSaved}
+                    class={`rounded-lg border px-4 py-3 leading-none font-black text-white disabled:cursor-not-allowed disabled:border-[#c6c6cd] disabled:bg-[#eceef0] disabled:text-[#76777d] ${
+                      grantSaved ? 'border-[#131b2e] bg-[#131b2e]' : 'border-emerald-700 bg-emerald-700 hover:bg-emerald-800'
+                    }`}
+                    disabled={!grantRef}
+                    type="button"
+                    onclick={() => toggleGrantSaved(match.grant)}
+                  >
+                    {grantSaved ? 'Saved' : 'Save'}
+                  </button>
+                </article>
               {/each}
-            </div>
-          </section>
-        </div>
+            </section>
+          {/if}
 
-        <section class="profile-card profile-card--full" aria-labelledby="sector-heading">
-          <div class="profile-split">
-            <div>
-              <div class="profile-card__header">
-                <span class="profile-card-icon" aria-hidden="true">NA</span>
-                <div>
-                  <h3 id="sector-heading">Sector & Industry</h3>
-                  <p>Defines eligibility for specialized sector grants.</p>
+          <section class="mt-8 rounded-lg border border-slate-200 bg-white p-6 shadow-[0_4px_20px_rgba(0,0,0,0.03)]" aria-labelledby="shortlist-heading">
+            <div class="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4">
+              <div>
+                <p class={eyebrowClass}>Shortlist</p>
+                <h2 id="shortlist-heading" class="m-0 text-2xl leading-tight text-[#191c1e]">Compare saved grants</h2>
+              </div>
+
+              <dl class="m-0">
+                <div class="grid min-w-20 rounded-lg bg-[#f2f4f6] px-3 py-2">
+                  <dt class="text-[11px] font-black text-[#45464d] uppercase">Saved</dt>
+                  <dd class="m-0 text-lg font-black text-[#006c49]">{savedGrantRefs.length}</dd>
                 </div>
-              </div>
-
-              <div class="profile-field-grid profile-field-grid--single">
-                <label class="profile-field">
-                  <span>Primary Industry</span>
-                  <select bind:value={persona.industry} name="industry">
-                    <option value="">Select Industry</option>
-                    {#each industryOptions as industry (industry.value)}
-                      <option value={industry.value}>{industry.label}</option>
-                    {/each}
-                  </select>
-                </label>
-
-                <label class="profile-field">
-                  <span>Sub-Sector Focus</span>
-                  <select bind:value={persona.subSector} name="sub-sector">
-                    <option value="">Select Focus</option>
-                    {#each subSectorOptions as subSector (subSector.value)}
-                      <option value={subSector.value}>{subSector.label}</option>
-                    {/each}
-                  </select>
-                </label>
-
-                <label class="profile-field">
-                  <span>Additional Keywords</span>
-                  <textarea
-                    bind:value={persona.keywords}
-                    name="keywords"
-                    placeholder="accessibility, public sector, procurement"
-                    rows="3"
-                  ></textarea>
-                </label>
-              </div>
+              </dl>
             </div>
 
-            <div>
-              <div class="profile-card__header">
-                <span class="profile-card-icon" aria-hidden="true">CAP</span>
-                <div>
-                  <h3>Capital Objectives</h3>
-                  <p>Select all areas where funding will be allocated.</p>
+            {#if savedGrantRefs.length === 0}
+              <p class="m-0 py-8 text-sm leading-6 text-[#45464d]">No grants saved yet.</p>
+            {:else}
+              <div class="grid gap-0 overflow-hidden rounded-lg border border-slate-200" aria-label="Saved grant comparison">
+                <div class="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.6fr_auto] gap-4 bg-[#f2f4f6] px-4 py-3 text-xs font-black text-[#45464d] uppercase max-[840px]:hidden">
+                  <span>Grant</span>
+                  <span>Program</span>
+                  <span>Amount</span>
+                  <span>Fit</span>
+                  <span>Action</span>
                 </div>
-              </div>
 
-              <div class="profile-chip-group">
-                {#each activityOptions as activity (activity.value)}
-                  <label class="profile-chip-toggle">
-                    <input bind:checked={persona.activities[activity.value]} type="checkbox" />
-                    <span class={`profile-chip${persona.activities[activity.value] ? ' profile-chip--selected' : ''}`}>
-                      {#if persona.activities[activity.value]}
-                        <span aria-hidden="true">✓</span>
-                      {/if}
-                      {activity.label}
-                    </span>
-                  </label>
+                {#each shortlistedGrants as item (item.ref)}
+                  {#if item.match}
+                    {@const grant = item.match.grant}
+                    <div class="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.6fr_auto] gap-4 border-t border-slate-200 px-4 py-4 first:border-t-0 max-[840px]:grid-cols-1">
+                      <div class="grid gap-1">
+                        <span class="hidden text-[11px] font-black text-[#45464d] uppercase max-[840px]:block">Grant</span>
+                        <strong class="text-sm text-[#191c1e]">{grant.recipient_legal_name ?? 'Recipient unavailable'}</strong>
+                        <small class="break-words text-xs text-[#45464d]">{item.ref}</small>
+                      </div>
+                      <div class="grid gap-1">
+                        <span class="hidden text-[11px] font-black text-[#45464d] uppercase max-[840px]:block">Program</span>
+                        <span class="text-sm text-[#191c1e]">{grant.prog_name_en ?? 'Program unavailable'}</span>
+                        <small class="text-xs text-[#45464d]">{grant.owner_org_title ?? 'Organization unavailable'}</small>
+                      </div>
+                      <div class="grid gap-1">
+                        <span class="hidden text-[11px] font-black text-[#45464d] uppercase max-[840px]:block">Amount</span>
+                        <strong class="text-sm text-[#191c1e]">{formatMoney(grant.agreement_value)}</strong>
+                        <small class="text-xs text-[#45464d]">{formatDate(grant.agreement_start_date)} start</small>
+                      </div>
+                      <div class="grid gap-1">
+                        <span class="hidden text-[11px] font-black text-[#45464d] uppercase max-[840px]:block">Fit</span>
+                        <strong class="text-sm text-[#191c1e]">{item.match.matchScore}%</strong>
+                        <small class="text-xs text-[#45464d]">{item.match.statusLabel}</small>
+                      </div>
+                      <div>
+                        <button
+                          class={compactButtonClass}
+                          type="button"
+                          onclick={() => removeShortlistedGrant(item.ref)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  {:else}
+                    <div class="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.6fr_auto] gap-4 border-t border-slate-200 bg-slate-50 px-4 py-4 first:border-t-0 max-[840px]:grid-cols-1">
+                      <div class="grid gap-1">
+                        <span class="hidden text-[11px] font-black text-[#45464d] uppercase max-[840px]:block">Grant</span>
+                        <strong class="text-sm text-[#191c1e]">Grant not in current results</strong>
+                        <small class="break-words text-xs text-[#45464d]">{item.ref}</small>
+                      </div>
+                      <div><span class="text-sm text-[#45464d]">Program unavailable</span></div>
+                      <div><span class="text-sm text-[#45464d]">Amount unavailable</span></div>
+                      <div><span class="text-sm text-[#45464d]">Fit unavailable</span></div>
+                      <div>
+                        <button
+                          class={compactButtonClass}
+                          type="button"
+                          onclick={() => removeShortlistedGrant(item.ref)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  {/if}
                 {/each}
               </div>
 
-              <label class="profile-field profile-field--funding">
-                <span>Target Funding Amount</span>
-                <input bind:value={persona.fundingNeed} min="1" name="funding-need" placeholder="250000" type="number" />
-              </label>
-            </div>
-          </div>
+              <div class="mt-4 flex justify-end">
+                <button class={compactButtonClass} type="button" onclick={clearShortlist}>
+                  Clear shortlist
+                </button>
+              </div>
+            {/if}
+          </section>
         </section>
-
-        <section class="profile-actions" aria-label="Profile actions">
-          <a class="profile-button profile-button--secondary" href="/dashboard">Back</a>
-          <div class="profile-actions__right">
-            <button class="profile-button profile-button--ghost" type="button" onclick={clearPersona}>Clear profile</button>
-            <button class="profile-button profile-button--secondary" type="button" onclick={resetPersona}>Reset sample</button>
-            <button class="profile-button" type="button" onclick={saveAndContinue}>
-              Save and continue
-              <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
-            </button>
-          </div>
         </section>
-
-        <div class="profile-save-status" aria-live="polite">
-          {#if profileSaved}
-            Profile saved.
-          {/if}
-        </div>
       </section>
     </div>
-  </section>
-</main>
-
+  </main>
+</div>
+</div>

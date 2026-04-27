@@ -30,6 +30,18 @@ export type CachedFundingData = {
   benefits: CachedBenefitsResult;
 };
 
+export type HydrationProgress = {
+  loaded: number;
+  target: number;
+  fromCache: boolean;
+  done: boolean;
+};
+
+export type ProgressiveHydrationOptions = {
+  batchSize?: number;
+  onProgress?: (progress: HydrationProgress) => void;
+};
+
 type GrantsApiResponse = {
   count?: number;
   limit?: number;
@@ -69,6 +81,21 @@ function readCache<TResult extends { records: GenericRecord[] }>(key: string, re
   }
 }
 
+function readAnyCache<TResult extends { records: GenericRecord[] }>(key: string): TResult | null {
+  try {
+    const rawValue = localStorage.getItem(key);
+    const parsed = rawValue ? (JSON.parse(rawValue) as CacheEnvelope<TResult>) : null;
+
+    if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.result.records)) {
+      return null;
+    }
+
+    return parsed.result;
+  } catch {
+    return null;
+  }
+}
+
 function writeCache<TResult extends { records: GenericRecord[] }>(key: string, result: TResult) {
   try {
     localStorage.setItem(
@@ -81,6 +108,45 @@ function writeCache<TResult extends { records: GenericRecord[] }>(key: string, r
     );
   } catch {
     // localStorage can be unavailable in private windows or locked-down browsers.
+  }
+}
+
+function reportProgress(options: ProgressiveHydrationOptions | undefined, progress: HydrationProgress) {
+  options?.onProgress?.(progress);
+}
+
+function clampCount(value: number): number {
+  return Math.max(1, Math.min(5000, Math.floor(value)));
+}
+
+function updateGrantsEndpoint(endpoint: string, limit: number, offset: number): string {
+  try {
+    const url = new URL(endpoint);
+    url.searchParams.set('limit', String(limit));
+    url.searchParams.set('offset', String(offset));
+    url.searchParams.set('include_total', 'true');
+    return url.toString();
+  } catch {
+    return endpoint;
+  }
+}
+
+function updateBenefitsEndpoint(endpoint: string, count: number): string {
+  try {
+    const url = new URL(endpoint);
+    const segments = url.pathname.split('/');
+    const firstIndex = segments.lastIndexOf('first');
+
+    if (firstIndex >= 0 && firstIndex + 1 < segments.length) {
+      segments[firstIndex + 1] = String(count);
+      url.pathname = segments.join('/');
+    } else {
+      url.searchParams.set('limit', String(count));
+    }
+
+    return url.toString();
+  } catch {
+    return endpoint;
   }
 }
 
@@ -108,6 +174,25 @@ function sliceBenefitsResult(result: CachedBenefitsResult, requested: number, en
   };
 }
 
+function compactGrantRecord(record: GenericRecord): GenericRecord {
+  return {
+    _id: record._id,
+    ref_number: record.ref_number,
+    recipient_legal_name: record.recipient_legal_name,
+    agreement_value: record.agreement_value,
+    agreement_start_date: record.agreement_start_date,
+    agreement_end_date: record.agreement_end_date,
+    agreement_title_en: record.agreement_title_en,
+    description_en: record.description_en,
+    expected_results_en: record.expected_results_en,
+    prog_name_en: record.prog_name_en,
+    prog_purpose_en: record.prog_purpose_en,
+    owner_org_title: record.owner_org_title,
+    recipient_city: record.recipient_city,
+    recipient_province: record.recipient_province
+  };
+}
+
 async function fetchGrantsResult(endpoint: string, requested: number): Promise<CachedGrantsResult> {
   try {
     const response = await fetch(endpoint);
@@ -119,12 +204,12 @@ async function fetchGrantsResult(endpoint: string, requested: number): Promise<C
         records: [],
         total: null,
         endpoint,
-        error: `Backend returned HTTP ${response.status}.`
+        error: 'Funding records are temporarily unavailable.'
       };
     }
 
     const payload = (await response.json()) as GrantsApiResponse;
-    const records = Array.isArray(payload.records) ? payload.records : [];
+    const records = Array.isArray(payload.records) ? payload.records.map(compactGrantRecord) : [];
     const result = {
       requested: payload.requested ?? payload.limit ?? requested,
       count: payload.count ?? records.length,
@@ -137,14 +222,13 @@ async function fetchGrantsResult(endpoint: string, requested: number): Promise<C
     writeCache(GRANTS_CACHE_KEY, result);
     return sliceGrantsResult(result, requested, endpoint);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown backend error.';
     return {
       requested,
       count: 0,
       records: [],
       total: null,
       endpoint,
-      error: `Could not reach the backend at ${endpoint}: ${message}`
+      error: 'Funding records are temporarily unavailable. Try again in a moment.'
     };
   }
 }
@@ -160,7 +244,7 @@ async function fetchBenefitsResult(endpoint: string, requested: number): Promise
         records: [],
         source: null,
         endpoint,
-        error: `Backend returned HTTP ${response.status}.`
+        error: 'Business benefit records are temporarily unavailable.'
       };
     }
 
@@ -178,14 +262,51 @@ async function fetchBenefitsResult(endpoint: string, requested: number): Promise
     writeCache(BENEFITS_CACHE_KEY, result);
     return sliceBenefitsResult(result, requested, endpoint);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown backend error.';
     return {
       requested,
       count: 0,
       records: [],
       source: null,
       endpoint,
-      error: `Could not reach the backend at ${endpoint}: ${message}`
+      error: 'Business benefit records are temporarily unavailable. Try again in a moment.'
+    };
+  }
+}
+
+async function fetchGrantsPage(endpoint: string, requested: number): Promise<CachedGrantsResult> {
+  try {
+    const response = await fetch(endpoint);
+
+    if (!response.ok) {
+      return {
+        requested,
+        count: 0,
+        records: [],
+        total: null,
+        endpoint,
+        error: 'Funding records are temporarily unavailable.'
+      };
+    }
+
+    const payload = (await response.json()) as GrantsApiResponse;
+    const records = Array.isArray(payload.records) ? payload.records.map(compactGrantRecord) : [];
+
+    return {
+      requested: payload.requested ?? payload.limit ?? requested,
+      count: records.length,
+      records,
+      total: payload.total ?? null,
+      endpoint,
+      error: null
+    };
+  } catch {
+    return {
+      requested,
+      count: 0,
+      records: [],
+      total: null,
+      endpoint,
+      error: 'Funding records are temporarily unavailable. Try again in a moment.'
     };
   }
 }
@@ -203,6 +324,11 @@ export async function hydrateCachedGrantsResult(
   return fetchGrantsResult(endpoint, requested);
 }
 
+export function readCachedGrantsResult(endpoint: string, requested: number): CachedGrantsResult | null {
+  const cached = readCache<CachedGrantsResult>(GRANTS_CACHE_KEY, requested);
+  return cached ? sliceGrantsResult(cached, requested, endpoint) : null;
+}
+
 export async function hydrateCachedBenefitsResult(
   endpoint: string,
   requested: number
@@ -214,6 +340,138 @@ export async function hydrateCachedBenefitsResult(
   }
 
   return fetchBenefitsResult(endpoint, requested);
+}
+
+export async function hydrateProgressiveCachedGrantsResult(
+  endpoint: string,
+  requested: number,
+  options: ProgressiveHydrationOptions = {}
+): Promise<CachedGrantsResult> {
+  const target = clampCount(requested);
+  const batchSize = clampCount(options.batchSize ?? 500);
+  const finalEndpoint = updateGrantsEndpoint(endpoint, target, 0);
+  const cached = readCache<CachedGrantsResult>(GRANTS_CACHE_KEY, target);
+
+  if (cached) {
+    const result = sliceGrantsResult(cached, target, finalEndpoint);
+    reportProgress(options, { loaded: result.records.length, target, fromCache: true, done: true });
+    return result;
+  }
+
+  const partialCache = readAnyCache<CachedGrantsResult>(GRANTS_CACHE_KEY);
+  const records = partialCache?.records.slice(0, target) ?? [];
+  let total = partialCache?.total ?? null;
+
+  if (records.length > 0) {
+    reportProgress(options, { loaded: records.length, target, fromCache: true, done: false });
+  } else {
+    reportProgress(options, { loaded: 0, target, fromCache: false, done: false });
+  }
+
+  while (records.length < target) {
+    const pageLimit = Math.min(batchSize, target - records.length);
+    const pageEndpoint = updateGrantsEndpoint(endpoint, pageLimit, records.length);
+    const page = await fetchGrantsPage(pageEndpoint, pageLimit);
+
+    if (page.error) {
+      if (records.length > 0) {
+        const partialResult = {
+          requested: target,
+          count: records.length,
+          records,
+          total,
+          endpoint: finalEndpoint,
+          error: null
+        };
+        writeCache(GRANTS_CACHE_KEY, partialResult);
+        reportProgress(options, { loaded: records.length, target, fromCache: true, done: true });
+        return partialResult;
+      }
+
+      reportProgress(options, { loaded: 0, target, fromCache: false, done: true });
+      return {
+        requested: target,
+        count: 0,
+        records: [],
+        total: null,
+        endpoint: finalEndpoint,
+        error: page.error
+      };
+    }
+
+    if (page.records.length === 0) {
+      break;
+    }
+
+    records.push(...page.records);
+    total = page.total ?? total;
+
+    const merged = {
+      requested: target,
+      count: records.length,
+      records,
+      total,
+      endpoint: finalEndpoint,
+      error: null
+    };
+
+    writeCache(GRANTS_CACHE_KEY, merged);
+    reportProgress(options, { loaded: records.length, target, fromCache: false, done: false });
+
+    if (page.records.length < pageLimit || (total !== null && records.length >= total)) {
+      break;
+    }
+  }
+
+  const result = {
+    requested: target,
+    count: records.length,
+    records,
+    total,
+    endpoint: finalEndpoint,
+    error: null
+  };
+  writeCache(GRANTS_CACHE_KEY, result);
+  reportProgress(options, { loaded: records.length, target, fromCache: false, done: true });
+  return result;
+}
+
+export async function hydrateProgressiveCachedBenefitsResult(
+  endpoint: string,
+  requested: number,
+  options: ProgressiveHydrationOptions = {}
+): Promise<CachedBenefitsResult> {
+  const target = clampCount(requested);
+  const finalEndpoint = updateBenefitsEndpoint(endpoint, target);
+  const cached = readCache<CachedBenefitsResult>(BENEFITS_CACHE_KEY, target);
+
+  if (cached) {
+    const result = sliceBenefitsResult(cached, target, finalEndpoint);
+    reportProgress(options, { loaded: result.records.length, target, fromCache: true, done: true });
+    return result;
+  }
+
+  const partialCache = readAnyCache<CachedBenefitsResult>(BENEFITS_CACHE_KEY);
+  if (partialCache?.records.length) {
+    reportProgress(options, {
+      loaded: Math.min(partialCache.records.length, target),
+      target,
+      fromCache: true,
+      done: false
+    });
+  } else {
+    reportProgress(options, { loaded: 0, target, fromCache: false, done: false });
+  }
+
+  const result = await fetchBenefitsResult(finalEndpoint, target);
+  if (result.error && partialCache?.records.length) {
+    const partialResult = sliceBenefitsResult(partialCache, Math.min(partialCache.records.length, target), finalEndpoint);
+    reportProgress(options, { loaded: partialResult.records.length, target, fromCache: true, done: true });
+    return partialResult;
+  }
+
+  reportProgress(options, { loaded: result.records.length, target, fromCache: false, done: true });
+  return result;
 }
 
 export async function hydrateCachedFundingData<TData extends CachedFundingData>(data: TData): Promise<TData> {
@@ -229,4 +487,3 @@ export async function hydrateCachedFundingData<TData extends CachedFundingData>(
     benefits
   };
 }
-

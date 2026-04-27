@@ -51,6 +51,7 @@ Useful endpoints:
 - `GET /health`
 - `GET /api/grants/discover`
 - `GET /api/grants?limit=10&offset=0`
+- `GET /api/grants?year=2024&limit=25&sort=amount&include_total=false`
 - `GET /api/grants/first/10`
 - `GET /api/grants/by-calendar-year/2024?limit=10&order=desc`
 - `GET /api/business-benefits/first/10`
@@ -62,3 +63,5 @@ Useful endpoints:
 - `GET /api/grants/by-reference/199-2019-2020-Q4-%20CSGC16725277`
 - `GET /api/grants/csv-url`
 - `POST /api/grants/export`
+
+For frontend URL-backed filters, prefer the fast `/api/grants` query shape with `year`, `limit`, `sort`, and `include_total=false`. The calendar-year route still exists, but it does more CKAN offset work and is better suited for backend/API experiments than SSR page loads.

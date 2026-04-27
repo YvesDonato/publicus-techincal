@@ -18,19 +18,38 @@ from publicus_backend.core.query import (
 from publicus_backend.schemas.grants import ExportRequest
 from publicus_backend.services.grants import (
     GRANTS_RESOURCE_ID,
+    NIL_RESOURCE_ID,
     SEARCH_BASE_URL,
     build_client,
     datastore_page,
     discover,
     package_show,
     poll_export,
-    resolve_resource_id,
     resource_by_id,
     start_export,
 )
 
 
 router = APIRouter(prefix="/api/grants", tags=["grants"])
+
+ALLOWED_GRANTS_FILTER_FIELDS = {
+    "_id",
+    "agreement_end_date",
+    "agreement_start_date",
+    "agreement_title_en",
+    "agreement_type",
+    "agreement_value",
+    "owner_org",
+    "owner_org_title",
+    "prog_name_en",
+    "recipient_city",
+    "recipient_legal_name",
+    "recipient_province",
+    "ref_number",
+}
+MAX_GRANTS_QUERY_LENGTH = 500
+MAX_GRANTS_FILTERS = 12
+MAX_GRANTS_FILTER_VALUE_LENGTH = 500
 
 
 def normalize_grants_sort(sort: str | None) -> str | None:
@@ -47,6 +66,41 @@ def normalize_grants_sort(sort: str | None) -> str | None:
         return f"{parts[0]} {parts[1].lower()}"
 
     raise HTTPException(status_code=400, detail="sort must be score, amount, newest, or an allowed CKAN sort expression.")
+
+
+def resolve_grants_resource(resource: str) -> str:
+    if resource in {"grants", GRANTS_RESOURCE_ID}:
+        return GRANTS_RESOURCE_ID
+    if resource in {"nil", "nil-report", NIL_RESOURCE_ID}:
+        return NIL_RESOURCE_ID
+    raise HTTPException(status_code=400, detail="resource must be 'grants' or 'nil'.")
+
+
+def normalize_grants_query(q: str | None) -> str | None:
+    if q is not None and len(q) > MAX_GRANTS_QUERY_LENGTH:
+        raise HTTPException(status_code=400, detail=f"q must be {MAX_GRANTS_QUERY_LENGTH} characters or fewer.")
+    return q
+
+
+def parse_grants_filter_query(filter_values: list[str]) -> dict[str, str] | None:
+    if len(filter_values) > MAX_GRANTS_FILTERS:
+        raise HTTPException(status_code=400, detail=f"At most {MAX_GRANTS_FILTERS} filters are allowed.")
+
+    filters = parse_filter_query(filter_values)
+    if not filters:
+        return None
+
+    for key, value in filters.items():
+        if key not in ALLOWED_GRANTS_FILTER_FIELDS:
+            allowed = ", ".join(sorted(ALLOWED_GRANTS_FILTER_FIELDS))
+            raise HTTPException(status_code=400, detail=f"filter key must be one of: {allowed}.")
+        if len(value) > MAX_GRANTS_FILTER_VALUE_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"filter value for {key} must be {MAX_GRANTS_FILTER_VALUE_LENGTH} characters or fewer.",
+            )
+
+    return filters
 
 
 def record_date_value(record: dict[str, Any], date_field: str) -> str:
@@ -106,6 +160,7 @@ def first_offset_for_date(
 def grants_discover(
     query_string: str = Query(
         default="",
+        max_length=2000,
         description="Optional website query string, for example 'year=2025&owner_org=nrc-cnrc'.",
     ),
     timeout: float = Query(default=60.0, ge=5.0, le=300.0),
@@ -138,7 +193,7 @@ def grants_csv_url(
     timeout: float = Query(default=60.0, ge=5.0, le=300.0),
 ) -> dict[str, Any]:
     try:
-        resource_id = resolve_resource_id(resource)
+        resource_id = resolve_grants_resource(resource)
         with build_client(timeout) as client:
             package = package_show(client)
             dataset_resource = resource_by_id(package, resource_id)
@@ -183,9 +238,9 @@ def list_grants(
     timeout: float = Query(default=60.0, ge=5.0, le=300.0),
 ) -> dict[str, Any]:
     try:
-        resource_id = resolve_resource_id(resource)
-        filters = parse_filter_query(filter_values)
-        query: str | dict[str, str] | None = q
+        resource_id = resolve_grants_resource(resource)
+        filters = parse_grants_filter_query(filter_values)
+        query: str | dict[str, str] | None = normalize_grants_query(q)
         if year is not None:
             query = {"agreement_start_date": str(year)}
         datastore_sort = normalize_grants_sort(sort)
@@ -228,7 +283,7 @@ def first_grants(
     timeout: float = Query(default=60.0, ge=5.0, le=300.0),
 ) -> dict[str, Any]:
     try:
-        resource_id = resolve_resource_id(resource)
+        resource_id = resolve_grants_resource(resource)
         with build_client(timeout) as client:
             result = datastore_page(
                 client,
@@ -271,7 +326,7 @@ def grants_by_calendar_year(
         sort_order = normalize_sort_order(order)
         calendar_date_field = normalize_calendar_date_field(date_field)
         start_date, end_date = calendar_year_range(year)
-        resource_id = resolve_resource_id(resource)
+        resource_id = resolve_grants_resource(resource)
 
         with build_client(timeout) as client:
             total_records, fields = sorted_datastore_total(client, resource_id, calendar_date_field)
