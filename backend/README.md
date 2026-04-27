@@ -58,6 +58,11 @@ Useful endpoints:
 - `GET /api/business-benefits/by-category?limit=10`
 - `GET /api/business-benefits/by-category/Grants?limit=10`
 - `GET /api/innovation/first/10`
+- `GET /api/pipeline/status`
+- `POST /api/pipeline/ingest/grants?max_records=1000` with `x-publicus-admin-token`
+- `POST /api/pipeline/ingest/business-benefits?max_records=1000` with `x-publicus-admin-token`
+- `GET /api/pipeline/records?source=grants&limit=100&offset=0`
+- `GET /api/pipeline/records?source=business-benefits&active=true&limit=100`
 - `GET /api/grants?q=Carleton%20University&limit=5`
 - `GET /api/grants?filter=owner_org=casdo-ocena&limit=5`
 - `GET /api/grants/by-reference/199-2019-2020-Q4-%20CSGC16725277`
@@ -65,3 +70,17 @@ Useful endpoints:
 - `POST /api/grants/export`
 
 For frontend URL-backed filters, prefer the fast `/api/grants` query shape with `year`, `limit`, `sort`, and `include_total=false`. The calendar-year route still exists, but it does more CKAN offset work and is better suited for backend/API experiments than SSR page loads.
+
+## Semantic embeddings
+
+The semantic search route uses Google Gemini embeddings by default:
+
+```bash
+PUBLICUS_EMBEDDING_PROVIDER=google
+PUBLICUS_GOOGLE_EMBEDDING_MODEL=gemini-embedding-001
+PUBLICUS_EMBEDDING_DIMENSIONS=1536
+PUBLICUS_GOOGLE_EMBEDDING_BATCH_SIZE=100
+GEMINI_API_KEY=...
+```
+
+`GOOGLE_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY` can be used instead of `GEMINI_API_KEY`. The 1536-dimensional output is intentional because the Supabase `opportunity_embeddings` pgvector table is declared as `vector(1536)`.

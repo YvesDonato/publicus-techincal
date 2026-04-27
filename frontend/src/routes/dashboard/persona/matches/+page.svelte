@@ -2,10 +2,47 @@
   import WorkspaceSidebar from '$lib/WorkspaceSidebar.svelte';
   import WorkspaceTopbar from '$lib/WorkspaceTopbar.svelte';
   import { browser } from '$app/environment';
-  import { hydrateCachedGrantsResult, readCachedGrantsResult, type CachedGrantsResult } from '$lib/client/funding-cache';
+  import { page } from '$app/state';
+  import {
+    hydrateCachedGrantsResult,
+    hydrateProgressiveCachedBenefitsResult,
+    readCachedGrantsResult,
+    type CachedBenefitsResult,
+    type CachedGrantsResult
+  } from '$lib/client/funding-cache';
+  import {
+    fetchBusinessBenefitsFeedState,
+    getBusinessBenefitsFeedMarker,
+    readStoredBusinessBenefitsFeedState,
+    readStoredStringList,
+    shouldRefreshBusinessBenefitsCache,
+    writeStoredBusinessBenefitsFeedState,
+    writeStoredStringList
+  } from '$lib/client/business-benefits-updates';
+  import {
+    fetchSemanticScoresForMatches,
+    getSemanticRecordId,
+    type SemanticScore,
+    type SemanticScoreMap
+  } from '$lib/client/semantic-scoring';
+  import {
+    fetchOpportunityAnalysis,
+    fetchOpportunityFitJudgments,
+    getOpportunityAnalysisCacheKey,
+    getOpportunityFitJudgmentCacheKey,
+    type OpportunityAnalysis,
+    type OpportunityFitJudgment
+  } from '$lib/client/opportunity-analysis';
+  import {
+    applyOpportunitySemanticScore as applySharedOpportunitySemanticScore,
+    isCurrentlyAvailableOpportunity,
+    scoreOpportunityBenefitRecord,
+    scoreOpportunityGrantRecord
+  } from '$lib/client/opportunity-matches';
   import { onMount } from 'svelte';
 
   type SortMode = 'score' | 'amount' | 'newest';
+  type GenericRecord = Record<string, unknown>;
   type GrantRecord = {
     _id: number;
     ref_number: string | null;
@@ -51,20 +88,15 @@
     };
   };
   const DEFAULT_BACKEND_API_URL = 'http://127.0.0.1:8000';
-  const DEFAULT_COUNT = 10;
-  const MAX_COUNT = 100;
+  const MAX_COUNT = 5000;
   const pageShellClass =
     'flex h-screen overflow-hidden bg-[#f7f9fb] font-[Inter,ui-sans-serif,system-ui,sans-serif] text-[#191c1e]';
   const profileCanvasClass = 'mx-auto w-full max-w-[1280px] px-6 py-12 max-md:px-4 max-md:py-7';
   const profileIntroClass = 'mb-12 flex items-end justify-between gap-6 max-lg:grid max-lg:items-start max-md:mb-7';
   const sortLinkClass =
-    'rounded-full px-3.5 py-2.5 text-sm leading-none font-extrabold text-[#191c1e] no-underline hover:bg-[#f2f4f6] focus-visible:bg-[#f2f4f6]';
-  const sortLinkActiveClass = 'rounded-full bg-[#006c49] px-3.5 py-2.5 text-sm leading-none font-extrabold text-white no-underline';
-  const filterFieldClass = 'grid gap-2 text-sm font-bold text-[#25302a]';
-  const filterInputClass =
-    'min-h-[42px] w-full rounded-lg border border-[#bec9c1] bg-white px-3 py-2 font-medium leading-[1.4] text-[#172026] focus:border-emerald-700 focus:outline-[3px] focus:outline-offset-2 focus:outline-emerald-200';
-  const primaryButtonClass =
-    'inline-flex items-center justify-center rounded-lg border border-emerald-800 bg-emerald-800 px-3.5 py-3 leading-none font-extrabold text-white no-underline hover:bg-emerald-900 focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-emerald-200';
+    'inline-flex min-h-9 items-center justify-center rounded-full px-4 text-sm leading-none font-extrabold text-[#191c1e] no-underline transition hover:bg-[#f2f4f6] focus-visible:bg-[#f2f4f6]';
+  const sortLinkActiveClass =
+    'inline-flex min-h-9 items-center justify-center rounded-full bg-[#006c49] px-4 text-sm leading-none font-extrabold text-white no-underline shadow-sm';
   const secondaryButtonClass =
     'inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3.5 py-3 leading-none font-extrabold text-emerald-800 no-underline hover:bg-emerald-50 focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-emerald-200';
   const compactButtonClass = `${secondaryButtonClass} min-h-9 px-3 py-2 text-sm`;
@@ -87,7 +119,6 @@
   type CompanyPersona = {
     legalEntityName: string;
     doingBusinessAs: string;
-    businessNumber: string;
     incorporationDate: string;
     website: string;
     province: string;
@@ -110,9 +141,23 @@
     risks: string[];
     nextActions: string[];
   };
-  type ShortlistedGrant = {
+  type BenefitMatch = {
+    record: GenericRecord;
+    amount: number | null;
+    estimatedAmount: number | null;
+    potentialFunding: number | null;
+    historicalEvidenceCount: number;
+    matchedKeywords: string[];
+    matchScore: number;
+    statusLabel: string;
+    statusTone: 'likely' | 'review' | 'low';
+    reasons: string[];
+    risks: string[];
+    nextActions: string[];
+  };
+  type ShortlistedOpportunity = {
     ref: string;
-    match: GrantMatch | null;
+    match: BenefitMatch | null;
   };
 
   const companyTypes: { value: CompanyType; label: string }[] = [
@@ -152,7 +197,26 @@
   const subSectorOptions = [
     { value: 'ai', label: 'Artificial Intelligence (AI)', terms: ['ai', 'artificial intelligence', 'machine learning'] },
     { value: 'saas', label: 'B2B SaaS', terms: ['saas', 'software', 'cloud'] },
+    { value: 'cybersecurity', label: 'Cybersecurity', terms: ['cybersecurity', 'cyber security', 'security', 'privacy'] },
+    { value: 'data', label: 'Data & Analytics', terms: ['data', 'analytics', 'business intelligence', 'reporting'] },
+    { value: 'fintech', label: 'FinTech', terms: ['fintech', 'financial technology', 'payments', 'banking'] },
+    { value: 'healthtech', label: 'HealthTech / MedTech', terms: ['healthtech', 'medtech', 'medical device', 'digital health'] },
+    { value: 'biotech', label: 'Biotechnology', terms: ['biotechnology', 'biotech', 'life sciences', 'biomanufacturing'] },
+    { value: 'advanced-mfg', label: 'Advanced Manufacturing', terms: ['advanced manufacturing', 'manufacturing', 'automation', 'production'] },
+    { value: 'robotics', label: 'Robotics & Automation', terms: ['robotics', 'robot', 'automation', 'industrial automation'] },
+    { value: 'hardware-iot', label: 'Hardware / IoT', terms: ['hardware', 'iot', 'internet of things', 'connected device'] },
+    { value: 'agtech', label: 'AgTech / FoodTech', terms: ['agtech', 'foodtech', 'agriculture technology', 'food processing'] },
     { value: 'clean', label: 'CleanTech', terms: ['clean technology', 'energy', 'sustainability'] },
+    { value: 'clean-energy', label: 'Clean Energy', terms: ['clean energy', 'renewable energy', 'solar', 'wind'] },
+    { value: 'ev', label: 'Electric Vehicles & Batteries', terms: ['electric vehicle', 'ev', 'battery', 'charging'] },
+    { value: 'circular', label: 'Circular Economy', terms: ['circular economy', 'recycling', 'waste reduction', 'reuse'] },
+    { value: 'construction-tech', label: 'Construction Tech', terms: ['construction technology', 'proptech', 'building technology', 'retrofit'] },
+    { value: 'aerospace', label: 'Aerospace', terms: ['aerospace', 'aviation', 'aircraft', 'space'] },
+    { value: 'ocean', label: 'Ocean / Marine Tech', terms: ['ocean technology', 'marine', 'aquaculture', 'blue economy'] },
+    { value: 'supply-chain', label: 'Supply Chain & Logistics', terms: ['supply chain', 'logistics', 'transportation', 'distribution'] },
+    { value: 'digital-media', label: 'Digital Media & Gaming', terms: ['digital media', 'gaming', 'interactive media', 'content'] },
+    { value: 'edtech', label: 'Education Technology', terms: ['edtech', 'education technology', 'learning', 'training'] },
+    { value: 'social-impact', label: 'Social Impact', terms: ['social impact', 'community', 'inclusive', 'nonprofit'] },
     { value: 'accessibility', label: 'Accessibility Tech', terms: ['accessibility', 'accessible', 'disability'] },
     { value: 'export', label: 'Export Growth', terms: ['export', 'international', 'market'] }
   ];
@@ -172,6 +236,32 @@
       terms: ['green', 'sustainability', 'climate', 'emissions', 'energy']
     }
   ];
+  const titleFields = [
+    'title',
+    'project_title',
+    'project_name',
+    'name',
+    'company_name',
+    'business_name',
+    'recipient_legal_name',
+    'organization_name',
+    'applicant_name'
+  ];
+  const subtitleFields = [
+    'program',
+    'program_name',
+    'program_name_en',
+    'funding_program',
+    'stream',
+    'sector',
+    'industry',
+    'status',
+    'category'
+  ];
+  const amountFields = ['amount', 'funding_amount', 'approved_amount', 'agreement_value', 'contribution', 'loan', 'value'];
+  const locationFields = ['location', 'city', 'province', 'region', 'country'];
+  const dateFields = ['deadline', 'closing_date', 'end_date', 'date', 'updated_at', 'modified'];
+  const idFields = ['_id', 'id', 'record_id', 'project_id', 'application_id', 'token', 'reference', 'url'];
 
   const moneyFormatter = new Intl.NumberFormat('en-CA', {
     currency: 'CAD',
@@ -185,48 +275,78 @@
   });
   const LIKELY_MATCH_THRESHOLD = 75;
   const PROFILE_STORAGE_KEY = 'publicus.companyProfile.v1';
-  const SHORTLIST_STORAGE_KEY = 'publicus.shortlistedGrantRefs';
+  const SHORTLIST_STORAGE_KEY = 'publicus.shortlistedOpportunityRefs';
+  const LIKELY_OPPORTUNITY_REFS_STORAGE_KEY = 'fundradar.opportunityMatchesLikelyRefs.v1';
+  const INITIAL_VISIBLE_OPPORTUNITIES = 10;
+  const OPPORTUNITY_PAGE_SIZE = 10;
+  const BENEFIT_RECORD_WINDOW = 100;
+  const HISTORICAL_GRANT_RECORD_WINDOW = 500;
 
   let persona = $state(createDefaultPersona());
-  let selectedYear = $state<string | null>(null);
-  let selectedCount = $state<string | null>(null);
-  let selectedSort = $state<SortMode | null>(null);
   let likelyOnly = $state(false);
-  let savedGrantRefs = $state<string[]>([]);
+  let visibleOpportunityTarget = $state(INITIAL_VISIBLE_OPPORTUNITIES);
+  let savedOpportunityRefs = $state<string[]>([]);
+  let semanticScores = $state<SemanticScoreMap>({});
+  let opportunityAnalyses = $state<Record<string, OpportunityAnalysis>>({});
+  let opportunityAnalysisLoading = $state<Record<string, boolean>>({});
+  let opportunityAnalysisErrors = $state<Record<string, string>>({});
+  let opportunityFitJudgments = $state<Record<string, OpportunityFitJudgment>>({});
+  let opportunityFitJudging = $state(false);
+  let opportunityFitFilterAvailable = $state(false);
+  let opportunityFitFilterMessage = $state('');
+  let showLlmExcluded = $state(false);
+  let lastOpportunityFitBatchKey = '';
+  let analysisModalMatch = $state<BenefitMatch | null>(null);
   let shortlistHydrated = $state(false);
   let profileHydrated = $state(false);
   let profileSaved = $state(false);
-  let grantsHydrated = $state(false);
+  let opportunitiesHydrated = $state(false);
+  let newLikelyOpportunityCount = $state(0);
 
-  const activeYear = $derived(selectedYear ?? data.filters.year?.toString() ?? '');
-  const activeCount = $derived(selectedCount ?? data.filters.count.toString());
-  const activeSortInput = $derived(selectedSort ?? data.filters.sort);
   const selectedActivities = $derived(
     activityOptions.filter((activity) => persona.activities[activity.value]).map((activity) => activity.value)
   );
   const personaKeywords = $derived(buildPersonaKeywords(persona, selectedActivities));
   const personaCompleteness = $derived(calculatePersonaCompleteness(persona, selectedActivities));
-  const grantMatches = $derived(data.grants.map((grant) => scoreGrant(grant, persona, personaKeywords)));
-  const savedGrantRefSet = $derived(new Set(savedGrantRefs));
-  const shortlistedGrants = $derived(
-    savedGrantRefs.map(
-      (ref): ShortlistedGrant => ({
+  const grantMatches = $derived(data.grants.map((grant) => scoreOpportunityGrantRecord(grant, persona)));
+  const activeBenefitRecords = $derived(data.innovation.records.filter(isCurrentlyAvailableOpportunity));
+  const ruleBenefitMatches = $derived(activeBenefitRecords.map((record) => scoreOpportunityBenefitRecord(record, persona, grantMatches)));
+  const benefitMatches = $derived(
+    ruleBenefitMatches.map((match, index) =>
+      applySharedOpportunitySemanticScore(match, semanticScores[getSemanticRecordId(match.record, 'business-benefits', index)])
+    )
+  );
+  const activeSort = $derived(parseSortMode(page.url.searchParams.get('sort')));
+  const savedOpportunityRefSet = $derived(new Set(savedOpportunityRefs));
+  const shortlistedOpportunities = $derived(
+    savedOpportunityRefs.map(
+      (ref): ShortlistedOpportunity => ({
         ref,
-        match: grantMatches.find((match) => getGrantRef(match.grant) === ref) ?? null
+        match: benefitMatches.find((match) => getOpportunityRef(match.record) === ref) ?? null
       })
     )
   );
-  const likelyMatchCount = $derived(grantMatches.filter((match) => match.matchScore >= LIKELY_MATCH_THRESHOLD).length);
-  const visibleGrantMatches = $derived(
-    sortGrantMatches(
-      likelyOnly ? grantMatches.filter((match) => match.matchScore >= LIKELY_MATCH_THRESHOLD) : grantMatches,
-      data.filters.sort
+  const likelyMatchCount = $derived(benefitMatches.filter((match) => match.matchScore >= LIKELY_MATCH_THRESHOLD).length);
+  const sortedBenefitMatches = $derived(
+    sortBenefitMatches(
+      likelyOnly ? benefitMatches.filter((match) => match.matchScore >= LIKELY_MATCH_THRESHOLD) : benefitMatches,
+      activeSort
     )
   );
-  const topOpportunity = $derived(visibleGrantMatches[0] ?? null);
-  const remainingOpportunities = $derived(visibleGrantMatches.slice(1));
-  const totalMatchedCapital = $derived(getTotalMatchedCapital(visibleGrantMatches));
+  const visibleCandidateBenefitMatches = $derived(sortedBenefitMatches.slice(0, visibleOpportunityTarget));
+  const llmExcludedVisibleMatches = $derived(visibleCandidateBenefitMatches.filter(isLlmExcludedOpportunity));
+  const visibleBenefitMatches = $derived(
+    showLlmExcluded ? visibleCandidateBenefitMatches : visibleCandidateBenefitMatches.filter((match) => !isLlmExcludedOpportunity(match))
+  );
+  const canLoadMoreOpportunities = $derived(sortedBenefitMatches.length > visibleCandidateBenefitMatches.length);
+  const topOpportunity = $derived(visibleBenefitMatches[0] ?? null);
+  const remainingOpportunities = $derived(visibleBenefitMatches.slice(1));
+  const totalMatchedCapital = $derived(getTotalMatchedCapital(visibleBenefitMatches));
+  const historicalEvidenceCount = $derived(grantMatches.filter((match) => match.matchScore >= 55 && match.amount !== null).length);
   const applicantName = $derived(persona.doingBusinessAs || persona.legalEntityName || 'your company');
+  const analysisModalAnalysis = $derived(analysisModalMatch ? getOpportunityAnalysis(analysisModalMatch) : null);
+  const analysisModalError = $derived(analysisModalMatch ? getOpportunityAnalysisError(analysisModalMatch) : '');
+  const analysisModalLoading = $derived(analysisModalMatch ? isOpportunityAnalysisLoading(analysisModalMatch) : false);
 
   function createInitialData(): PersonaData {
     const filters = readClientFilters();
@@ -240,11 +360,11 @@
       error: null,
       filters,
       innovation: {
-        requested: filters.count,
+        requested: BENEFIT_RECORD_WINDOW,
         count: 0,
         records: [],
         source: null,
-        endpoint: null,
+        endpoint: buildClientBenefitsEndpoint(BENEFIT_RECORD_WINDOW),
         error: null
       }
     };
@@ -271,7 +391,8 @@
       },
       innovation: {
         ...fallback.innovation,
-        ...(value.innovation ?? {})
+        ...(value.innovation ?? {}),
+        endpoint: value.innovation?.endpoint ?? fallback.innovation.endpoint
       }
     };
   }
@@ -282,7 +403,7 @@
     return {
       source: 'grants',
       year: parseCalendarYear(params.get('year')),
-      count: parseBoundedInteger(params.get('count'), DEFAULT_COUNT, 1, MAX_COUNT),
+      count: parseBoundedInteger(params.get('count'), HISTORICAL_GRANT_RECORD_WINDOW, 1, MAX_COUNT),
       sort: parseSortMode(params.get('sort'))
     };
   }
@@ -336,61 +457,104 @@
     };
   }
 
-  onMount(() => {
-    void hydrateProfile();
-    savedGrantRefs = readSavedGrantRefs();
-    shortlistHydrated = true;
+  function buildClientBenefitsEndpoint(count: number): string {
+    return `${DEFAULT_BACKEND_API_URL}/api/business-benefits/first/${count}`;
+  }
 
-    if (!hydratePersonaGrantsFromCache()) {
-      void hydratePersonaGrants();
-    }
+  onMount(() => {
+    savedOpportunityRefs = readSavedOpportunityRefs();
+    shortlistHydrated = true;
+    void hydrateInitialPage();
   });
 
+  async function hydrateInitialPage() {
+    await hydrateProfile();
+    await hydrateOpportunityData();
+  }
+
   async function hydrateProfile() {
-    persona = (await readServerPersona()) ?? readStoredPersona() ?? createDefaultPersona();
+    persona = readStoredPersona() ?? (await readServerPersona()) ?? createDefaultPersona();
     profileHydrated = true;
   }
 
-  async function hydratePersonaGrants() {
-    const endpoint = data.grantsQuery?.endpoint;
+  async function hydrateOpportunityData() {
+    const grantsEndpoint = data.grantsQuery?.endpoint;
+    const benefitsEndpoint = data.innovation.endpoint ?? buildClientBenefitsEndpoint(BENEFIT_RECORD_WINDOW);
+    const cachedGrants = grantsEndpoint ? readCachedGrantsResult(grantsEndpoint, data.requested) : null;
+    const feedState = await fetchBusinessBenefitsFeedState(DEFAULT_BACKEND_API_URL);
+    const previousFeedState = readStoredBusinessBenefitsFeedState();
+    const forceBenefitsRefresh = shouldRefreshBusinessBenefitsCache(previousFeedState, feedState);
+    const canReportNewFeedMatches = forceBenefitsRefresh && getBusinessBenefitsFeedMarker(previousFeedState) !== null;
 
-    if (!endpoint) {
-      grantsHydrated = true;
-      return;
+    if (cachedGrants) {
+      applyOpportunityResults(cachedGrants, null);
     }
 
-    const result = await hydrateCachedGrantsResult(endpoint, data.requested);
-    applyPersonaGrantsResult(result);
-    grantsHydrated = true;
+    const [grantsResult, benefitsResult] = await Promise.all([
+      grantsEndpoint
+        ? hydrateCachedGrantsResult(grantsEndpoint, data.requested)
+        : Promise.resolve<CachedGrantsResult>({
+            requested: 0,
+            count: 0,
+            records: [],
+            total: null,
+            endpoint: '',
+            error: null
+          }),
+      hydrateProgressiveCachedBenefitsResult(benefitsEndpoint, BENEFIT_RECORD_WINDOW, {
+        forceRefresh: forceBenefitsRefresh
+      })
+    ]);
+
+    applyOpportunityResults(grantsResult, benefitsResult);
+    if (feedState) {
+      writeStoredBusinessBenefitsFeedState(feedState);
+    }
+    updateLikelyOpportunityNotice(grantsResult, benefitsResult, canReportNewFeedMatches);
+    opportunitiesHydrated = true;
+    void hydrateSemanticOpportunityScores();
   }
 
-  function hydratePersonaGrantsFromCache(): boolean {
-    const endpoint = data.grantsQuery?.endpoint;
-
-    if (!endpoint) {
-      grantsHydrated = true;
-      return true;
-    }
-
-    const cached = readCachedGrantsResult(endpoint, data.requested);
-
-    if (!cached) {
-      return false;
-    }
-
-    applyPersonaGrantsResult(cached);
-    grantsHydrated = true;
-    return true;
-  }
-
-  function applyPersonaGrantsResult(result: CachedGrantsResult) {
+  function applyOpportunityResults(grantsResult: CachedGrantsResult, benefitsResult: CachedBenefitsResult | null) {
     clientData = {
       ...data,
-      grants: result.records as GrantRecord[],
-      total: result.total,
-      requested: result.requested,
-      error: result.error
+      grants: grantsResult.records as GrantRecord[],
+      total: grantsResult.total,
+      requested: grantsResult.requested,
+      error: grantsResult.error,
+      innovation: benefitsResult
+        ? {
+            requested: benefitsResult.requested,
+            count: benefitsResult.count,
+            records: benefitsResult.records,
+            source: benefitsResult.source,
+            endpoint: benefitsResult.endpoint,
+            error: benefitsResult.error
+          }
+        : data.innovation
     };
+  }
+
+  function updateLikelyOpportunityNotice(
+    grantsResult: CachedGrantsResult,
+    benefitsResult: CachedBenefitsResult,
+    canReportNewFeedMatches: boolean
+  ) {
+    const historicalMatches = (grantsResult.records as GrantRecord[]).map((grant) => scoreOpportunityGrantRecord(grant, persona));
+    const likelyRefs = benefitsResult.records
+      .filter(isCurrentlyAvailableOpportunity)
+      .map((record) => scoreOpportunityBenefitRecord(record, persona, historicalMatches))
+      .filter((match) => match.matchScore >= LIKELY_MATCH_THRESHOLD)
+      .map(getBenefitMatchRef)
+      .filter((value): value is string => value !== null);
+    const previousLikelyRefs = readStoredStringList(LIKELY_OPPORTUNITY_REFS_STORAGE_KEY);
+    const previousSet = new Set(previousLikelyRefs);
+
+    newLikelyOpportunityCount =
+      canReportNewFeedMatches && previousLikelyRefs.length > 0
+        ? likelyRefs.filter((ref) => !previousSet.has(ref)).length
+        : 0;
+    writeStoredStringList(LIKELY_OPPORTUNITY_REFS_STORAGE_KEY, likelyRefs);
   }
 
   $effect(() => {
@@ -406,14 +570,27 @@
       return;
     }
 
-    persistSavedGrantRefs(savedGrantRefs);
+    persistSavedOpportunityRefs(savedOpportunityRefs);
+  });
+
+  $effect(() => {
+    if (!browser || !opportunitiesHydrated || visibleCandidateBenefitMatches.length === 0) {
+      return;
+    }
+
+    const batchKey = visibleCandidateBenefitMatches.map(getOpportunityFitJudgmentKey).join('|');
+    if (!batchKey || batchKey === lastOpportunityFitBatchKey) {
+      return;
+    }
+
+    lastOpportunityFitBatchKey = batchKey;
+    void judgeVisibleOpportunityFits(visibleCandidateBenefitMatches);
   });
 
   function createDefaultPersona(): CompanyPersona {
     return {
       legalEntityName: 'AccessBuild AI Inc.',
       doingBusinessAs: 'AccessBuild AI',
-      businessNumber: '123456789 RT0001',
       incorporationDate: '2021-05-14',
       website: 'https://example.com',
       province: 'ON',
@@ -439,7 +616,6 @@
     return {
       legalEntityName: '',
       doingBusinessAs: '',
-      businessNumber: '',
       incorporationDate: '',
       website: '',
       province: '',
@@ -472,8 +648,8 @@
     profileSaved = false;
   }
 
-  function parseMoney(value: string | null | undefined): number | null {
-    if (!value) {
+  function parseMoney(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') {
       return null;
     }
 
@@ -548,7 +724,6 @@
   function calculatePersonaCompleteness(profile: CompanyPersona, activities: ActivityKey[]): number {
     const fields = [
       profile.legalEntityName,
-      profile.businessNumber,
       profile.incorporationDate,
       profile.website,
       profile.province,
@@ -699,6 +874,145 @@
     };
   }
 
+  function scoreBenefit(
+    record: GenericRecord,
+    profile: CompanyPersona,
+    keywords: string[],
+    historicalMatches: GrantMatch[]
+  ): BenefitMatch {
+    const reasons: string[] = [];
+    const risks: string[] = [];
+    const nextActions: string[] = [];
+    const text = genericRecordText(record);
+    const amount = parseMoneyFromRecord(record);
+    const fundingNeed = parseMoney(profile.fundingNeed);
+    const province = normalizeTerm(profile.province);
+    const city = normalizeTerm(profile.city);
+    let score = keywords.length > 0 || province || fundingNeed ? 30 : 45;
+
+    const matchedKeywords = keywords.filter((keyword) => termAppearsInText(text, keyword));
+    if (matchedKeywords.length > 0) {
+      score += Math.min(40, matchedKeywords.length * 8);
+      reasons.push(`Matches profile terms: ${matchedKeywords.slice(0, 5).join(', ')}.`);
+    } else if (keywords.length > 0) {
+      risks.push('No direct keyword overlap with this active opportunity.');
+    }
+
+    if (province && termAppearsInText(text, province)) {
+      score += 10;
+      reasons.push(`Opportunity text includes ${profile.province.toUpperCase()}.`);
+    }
+
+    if (city && termAppearsInText(text, city)) {
+      score += 6;
+      reasons.push(`Opportunity text includes ${profile.city}.`);
+    }
+
+    if (amount !== null && fundingNeed !== null) {
+      score += amount >= fundingNeed ? 10 : 4;
+      reasons.push('Published amount can be compared with the profile funding target.');
+    }
+
+    addCompanyTypeSignals(profile, text, reasons, risks, (points) => {
+      score += points;
+    });
+
+    const historicalEvidence = findHistoricalEvidence(record, historicalMatches, keywords, matchedKeywords);
+    const historicalAmounts = historicalEvidence
+      .map((match) => match.amount)
+      .filter((value): value is number => value !== null && value > 0);
+    const estimatedAmount = amount === null ? median(historicalAmounts) : null;
+    const potentialFunding = amount ?? estimatedAmount;
+
+    if (historicalEvidence.length > 0) {
+      const strongEvidenceCount = historicalEvidence.filter((match) => match.matchScore >= LIKELY_MATCH_THRESHOLD).length;
+      score += Math.min(18, historicalEvidence.length * 3 + strongEvidenceCount * 2);
+      reasons.push(
+        `${historicalEvidence.length} similar historical funding ${historicalEvidence.length === 1 ? 'record supports' : 'records support'} this match.`
+      );
+
+      if (estimatedAmount !== null) {
+        reasons.push('Potential funding is estimated from the median similar historical award.');
+      }
+    } else {
+      risks.push('No similar historical grant records found in the loaded evidence window.');
+    }
+
+    if (potentialFunding !== null && fundingNeed !== null && potentialFunding >= fundingNeed * 0.25 && potentialFunding <= fundingNeed * 4) {
+      score += 5;
+      reasons.push('Potential funding is in a practical range for this profile.');
+    }
+
+    nextActions.push('Confirm deadline, applicant type, and eligible costs on the official program page.');
+    if (matchedKeywords.length > 0) {
+      nextActions.push(`Frame the application around ${matchedKeywords.slice(0, 2).join(' and ')}.`);
+    }
+    if (potentialFunding !== null) {
+      nextActions.push(`Compare the project budget with the ${moneyFormatter.format(potentialFunding)} funding signal.`);
+    }
+
+    const matchScore = Math.max(0, Math.min(100, Math.round(score)));
+    const status =
+      matchScore >= LIKELY_MATCH_THRESHOLD
+        ? { label: 'Likely match', tone: 'likely' as const }
+        : matchScore >= 55
+          ? { label: 'Worth review', tone: 'review' as const }
+          : { label: 'Low confidence', tone: 'low' as const };
+
+    return {
+      record,
+      amount,
+      estimatedAmount,
+      potentialFunding,
+      historicalEvidenceCount: historicalEvidence.length,
+      matchedKeywords,
+      matchScore,
+      statusLabel: status.label,
+      statusTone: status.tone,
+      reasons: unique(reasons).slice(0, 4),
+      risks: unique(risks).slice(0, 3),
+      nextActions: unique(nextActions).slice(0, 3)
+    };
+  }
+
+  function findHistoricalEvidence(
+    benefit: GenericRecord,
+    historicalMatches: GrantMatch[],
+    keywords: string[],
+    matchedBenefitKeywords: string[]
+  ): GrantMatch[] {
+    const benefitText = genericRecordText(benefit);
+    const profileProvince = persona.province.trim().toUpperCase();
+    const activeTerms = selectedActivities.flatMap((activity) => {
+      const option = activityOptions.find((item) => item.value === activity);
+      return option ? option.terms : [];
+    });
+    const comparisonTerms = unique([...matchedBenefitKeywords, ...keywords.slice(0, 8), ...activeTerms]);
+
+    return historicalMatches
+      .filter((match) => {
+        if (match.matchScore < 55 || match.amount === null) {
+          return false;
+        }
+
+        const historicalText = grantText(match.grant);
+        const sharedTerm = comparisonTerms.some(
+          (term) => termAppearsInText(benefitText, term) && termAppearsInText(historicalText, term)
+        );
+        const sharedLocation =
+          profileProvince.length > 0 &&
+          match.grant.recipient_province?.toUpperCase() === profileProvince &&
+          termAppearsInText(benefitText, profileProvince);
+        const sharedProgramLanguage = [getRecordFieldValue(benefit, subtitleFields), getRecordFieldValue(benefit, titleFields)]
+          .filter((value): value is string => value !== null)
+          .some((value) => normalizeTerm(value).split(' ').some((term) => term.length > 3 && termAppearsInText(historicalText, term)));
+
+        return sharedTerm || sharedLocation || sharedProgramLanguage;
+      })
+      .sort((left, right) => right.matchScore - left.matchScore)
+      .slice(0, 25);
+  }
+
   function sortGrantMatches(matches: GrantMatch[], mode: SortMode): GrantMatch[] {
     return [...matches].sort((left, right) => {
       if (mode === 'amount') {
@@ -711,6 +1025,162 @@
 
       return right.matchScore - left.matchScore;
     });
+  }
+
+  function sortBenefitMatches(matches: BenefitMatch[], mode: SortMode): BenefitMatch[] {
+    return [...matches].sort((left, right) => {
+      if (mode === 'amount') {
+        return (right.potentialFunding ?? 0) - (left.potentialFunding ?? 0);
+      }
+
+      if (mode === 'newest') {
+        return getBenefitDateValue(right.record) - getBenefitDateValue(left.record);
+      }
+
+      return right.matchScore - left.matchScore;
+    });
+  }
+
+  function addCompanyTypeSignals(
+    profile: CompanyPersona,
+    text: string,
+    reasons: string[],
+    risks: string[],
+    addScore: (points: number) => void
+  ) {
+    if (profile.companyType === 'academic' && /university|college|research|academic/.test(text)) {
+      addScore(10);
+      reasons.push('Academic or research language appears in the opportunity.');
+    } else if (profile.companyType === 'nonprofit' && /non.?profit|society|association|institute|foundation|council/.test(text)) {
+      addScore(8);
+      reasons.push('Nonprofit-style language appears in the opportunity.');
+    } else if (profile.companyType === 'for-profit' && /business|company|sme|small and medium|enterprise|commercial/.test(text)) {
+      addScore(8);
+      reasons.push('Business eligibility language appears in the opportunity.');
+    } else if (profile.companyType === 'public-sector' && /municipal|government|public sector|community/.test(text)) {
+      addScore(8);
+      reasons.push('Public-sector language appears in the opportunity.');
+    } else {
+      risks.push('Applicant type eligibility needs confirmation.');
+    }
+  }
+
+  function isCurrentlyAvailableBenefit(record: GenericRecord): boolean {
+    const text = genericRecordText(record);
+    return !/\b(closed|expired|inactive|archived|not accepting|no longer accepting|application closed)\b/i.test(text);
+  }
+
+  function genericRecordText(record: GenericRecord): string {
+    return Object.entries(record)
+      .map(([key, value]) => `${formatFieldLabel(key)} ${key} ${valueToSearchText(value)}`)
+      .join(' ')
+      .toLowerCase();
+  }
+
+  function parseMoneyFromRecord(record: GenericRecord): number | null {
+    for (const [key, value] of Object.entries(record)) {
+      if (/amount|funding|contribution|grant|loan|value/i.test(key)) {
+        const parsed = parseMoney(value);
+        if (parsed !== null) {
+          return parsed;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function getBenefitDateValue(record: GenericRecord): number {
+    const dateValue = getRecordFieldValue(record, dateFields);
+
+    if (!dateValue) {
+      return 0;
+    }
+
+    const parsed = new Date(dateValue.includes('T') ? dateValue : `${dateValue}T00:00:00`).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  function median(values: number[]): number | null {
+    if (values.length === 0) {
+      return null;
+    }
+
+    const sorted = [...values].sort((left, right) => left - right);
+    const midpoint = Math.floor(sorted.length / 2);
+
+    return sorted.length % 2 === 0 ? Math.round((sorted[midpoint - 1] + sorted[midpoint]) / 2) : sorted[midpoint];
+  }
+
+  function valueIsPresent(value: unknown): boolean {
+    return value !== null && value !== undefined && value !== '';
+  }
+
+  function valueToString(value: unknown): string {
+    if (!valueIsPresent(value)) {
+      return 'Unavailable';
+    }
+
+    if (typeof value === 'boolean') {
+      return value ? 'Yes' : 'No';
+    }
+
+    if (typeof value === 'object') {
+      return JSON.stringify(value);
+    }
+
+    return String(value);
+  }
+
+  function valueToSearchText(value: unknown): string {
+    if (!valueIsPresent(value)) {
+      return '';
+    }
+
+    if (Array.isArray(value)) {
+      return value.map(valueToSearchText).join(' ');
+    }
+
+    if (typeof value === 'object') {
+      return Object.entries(value as GenericRecord)
+        .map(([key, nestedValue]) => `${key} ${valueToSearchText(nestedValue)}`)
+        .join(' ');
+    }
+
+    return valueToString(value);
+  }
+
+  function formatFieldLabel(key: string): string {
+    return key
+      .replace(/^_+/, '')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\b\w/g, (character) => character.toUpperCase());
+  }
+
+  function findField(record: GenericRecord, candidates: string[]): { key: string; value: unknown } | null {
+    const normalizedEntries = Object.entries(record).map(([key, value]) => ({
+      key,
+      normalizedKey: key.toLowerCase(),
+      value
+    }));
+
+    for (const candidate of candidates) {
+      const normalizedCandidate = candidate.toLowerCase();
+      const match = normalizedEntries.find(
+        (entry) => entry.normalizedKey === normalizedCandidate && valueIsPresent(entry.value)
+      );
+
+      if (match) {
+        return { key: match.key, value: match.value };
+      }
+    }
+
+    return null;
+  }
+
+  function getRecordFieldValue(record: GenericRecord, candidates: string[]): string | null {
+    const field = findField(record, candidates);
+    return field ? valueToString(field.value) : null;
   }
 
   function getGrantDateValue(grant: GrantRecord): number {
@@ -745,7 +1215,6 @@
       return {
         legalEntityName: readStringField(parsed, 'legalEntityName', defaults.legalEntityName),
         doingBusinessAs: readStringField(parsed, 'doingBusinessAs', defaults.doingBusinessAs),
-        businessNumber: readStringField(parsed, 'businessNumber', defaults.businessNumber),
         incorporationDate: readStringField(parsed, 'incorporationDate', defaults.incorporationDate),
         website: readStringField(parsed, 'website', defaults.website),
         province: readStringField(parsed, 'province', defaults.province),
@@ -838,7 +1307,7 @@
     }
   }
 
-  function readSavedGrantRefs(): string[] {
+  function readSavedOpportunityRefs(): string[] {
     if (!browser) {
       return [];
     }
@@ -862,7 +1331,7 @@
     }
   }
 
-  function persistSavedGrantRefs(refs: string[]) {
+  function persistSavedOpportunityRefs(refs: string[]) {
     try {
       if (refs.length === 0) {
         localStorage.removeItem(SHORTLIST_STORAGE_KEY);
@@ -875,100 +1344,311 @@
     }
   }
 
-  function toggleGrantSaved(grant: GrantRecord) {
-    const ref = getGrantRef(grant);
+  function toggleOpportunitySaved(match: BenefitMatch) {
+    const ref = getOpportunityRef(match.record);
 
     if (!ref) {
       return;
     }
 
-    savedGrantRefs = savedGrantRefSet.has(ref)
-      ? savedGrantRefs.filter((savedRef) => savedRef !== ref)
-      : [...savedGrantRefs, ref];
+    savedOpportunityRefs = savedOpportunityRefSet.has(ref)
+      ? savedOpportunityRefs.filter((savedRef) => savedRef !== ref)
+      : [...savedOpportunityRefs, ref];
   }
 
-  function removeShortlistedGrant(ref: string) {
-    savedGrantRefs = savedGrantRefs.filter((savedRef) => savedRef !== ref);
+  async function judgeVisibleOpportunityFits(matches: BenefitMatch[]) {
+    if (!browser || matches.length === 0) {
+      return;
+    }
+
+    opportunityFitJudging = true;
+    opportunityFitFilterMessage = '';
+
+    try {
+      const descriptions = Object.fromEntries(
+        matches.map((match) => [getBenefitMatchRef(match) ?? getOpportunityTitle(match), getOpportunityDescription(match)])
+      );
+      const result = await fetchOpportunityFitJudgments({
+        backendApiUrl: getBackendApiUrl(data.innovation.endpoint),
+        profile: persona,
+        matches,
+        descriptions
+      });
+
+      opportunityFitJudgments = {
+        ...opportunityFitJudgments,
+        ...result.judgments
+      };
+      opportunityFitFilterAvailable = result.filter_available;
+      opportunityFitFilterMessage = result.filter_available ? '' : result.unavailable_reason ?? 'LLM fit filtering is unavailable.';
+    } catch (error) {
+      opportunityFitFilterMessage = error instanceof Error ? error.message : 'LLM fit filtering is unavailable.';
+    } finally {
+      opportunityFitJudging = false;
+    }
+  }
+
+  function retryOpportunityFitFilter() {
+    lastOpportunityFitBatchKey = '';
+    void judgeVisibleOpportunityFits(visibleCandidateBenefitMatches);
+  }
+
+  async function analyzeOpportunity(match: BenefitMatch, forceRefresh = false) {
+    if (!browser) {
+      return;
+    }
+
+    const key = getOpportunityAnalysisKey(match);
+    if (opportunityAnalysisLoading[key]) {
+      return;
+    }
+
+    opportunityAnalysisLoading = { ...opportunityAnalysisLoading, [key]: true };
+    opportunityAnalysisErrors = { ...opportunityAnalysisErrors, [key]: '' };
+
+    try {
+      const analysis = await fetchOpportunityAnalysis({
+        backendApiUrl: getBackendApiUrl(data.innovation.endpoint),
+        profile: persona,
+        match,
+        description: getOpportunityDescription(match),
+        forceRefresh
+      });
+
+      opportunityAnalyses = { ...opportunityAnalyses, [key]: analysis };
+    } catch (error) {
+      opportunityAnalysisErrors = {
+        ...opportunityAnalysisErrors,
+        [key]: error instanceof Error ? error.message : 'Could not analyze this opportunity.'
+      };
+    } finally {
+      opportunityAnalysisLoading = { ...opportunityAnalysisLoading, [key]: false };
+    }
+  }
+
+  function openOpportunityAnalysisModal(match: BenefitMatch) {
+    analysisModalMatch = match;
+
+    if (!getOpportunityAnalysis(match) && !isOpportunityAnalysisLoading(match)) {
+      void analyzeOpportunity(match);
+    }
+  }
+
+  function closeOpportunityAnalysisModal() {
+    analysisModalMatch = null;
+  }
+
+  function refreshOpportunityAnalysisModal() {
+    if (analysisModalMatch && !isOpportunityAnalysisLoading(analysisModalMatch)) {
+      void analyzeOpportunity(analysisModalMatch, true);
+    }
+  }
+
+  function handleAnalysisModalKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && analysisModalMatch) {
+      closeOpportunityAnalysisModal();
+    }
+  }
+
+  function handleAnalysisBackdropClick(event: MouseEvent) {
+    if (event.target === event.currentTarget) {
+      closeOpportunityAnalysisModal();
+    }
+  }
+
+  function getOpportunityFitJudgmentKey(match: BenefitMatch): string {
+    return getOpportunityFitJudgmentCacheKey(persona, match, getOpportunityDescription(match));
+  }
+
+  function getOpportunityFitJudgment(match: BenefitMatch): OpportunityFitJudgment | null {
+    return opportunityFitJudgments[getOpportunityFitJudgmentKey(match)] ?? null;
+  }
+
+  function isLlmExcludedOpportunity(match: BenefitMatch): boolean {
+    const judgment = getOpportunityFitJudgment(match);
+    return opportunityFitFilterAvailable && judgment?.should_show === false;
+  }
+
+  function getOpportunityFitBadgeLabel(match: BenefitMatch): string {
+    const judgment = getOpportunityFitJudgment(match);
+    if (!judgment || !opportunityFitFilterAvailable) {
+      return '';
+    }
+
+    if (judgment.fit === 'strong') {
+      return 'LLM strong fit';
+    }
+
+    if (judgment.fit === 'weak') {
+      return 'LLM excluded';
+    }
+
+    return 'LLM possible fit';
+  }
+
+  function getOpportunityFitBadgeClass(match: BenefitMatch): string {
+    const judgment = getOpportunityFitJudgment(match);
+    if (!judgment || !opportunityFitFilterAvailable) {
+      return 'hidden';
+    }
+
+    if (judgment.fit === 'strong') {
+      return 'rounded-full bg-emerald-100 px-2.5 py-1.5 text-xs leading-none font-black text-emerald-800 uppercase';
+    }
+
+    if (judgment.fit === 'weak') {
+      return 'rounded-full bg-red-50 px-2.5 py-1.5 text-xs leading-none font-black text-red-700 uppercase';
+    }
+
+    return 'rounded-full bg-[#e8eef7] px-2.5 py-1.5 text-xs leading-none font-black text-[#38485d] uppercase';
+  }
+
+  function getOpportunityAnalysisKey(match: BenefitMatch): string {
+    return getOpportunityAnalysisCacheKey(persona, match, getOpportunityDescription(match));
+  }
+
+  function getOpportunityAnalysis(match: BenefitMatch): OpportunityAnalysis | null {
+    return opportunityAnalyses[getOpportunityAnalysisKey(match)] ?? null;
+  }
+
+  function isOpportunityAnalysisLoading(match: BenefitMatch): boolean {
+    return opportunityAnalysisLoading[getOpportunityAnalysisKey(match)] === true;
+  }
+
+  function getOpportunityAnalysisError(match: BenefitMatch): string {
+    return opportunityAnalysisErrors[getOpportunityAnalysisKey(match)] ?? '';
+  }
+
+  function getOpportunityAnalysisButtonLabel(match: BenefitMatch): string {
+    if (isOpportunityAnalysisLoading(match)) {
+      return 'Analyzing...';
+    }
+
+    return getOpportunityAnalysis(match) ? 'View analysis' : 'Analyze fit';
+  }
+
+  function removeShortlistedOpportunity(ref: string) {
+    savedOpportunityRefs = savedOpportunityRefs.filter((savedRef) => savedRef !== ref);
   }
 
   function clearShortlist() {
-    savedGrantRefs = [];
+    savedOpportunityRefs = [];
   }
 
-  function getSortLabel(mode: SortMode): string {
-    if (mode === 'amount') {
-      return 'largest amount';
-    }
-
-    if (mode === 'newest') {
-      return 'newest first';
-    }
-
-    return 'best match';
+  function getTotalMatchedCapital(matches: BenefitMatch[]): number {
+    return matches.reduce((total, match) => total + (match.potentialFunding ?? 0), 0);
   }
 
-  function getGrantQuerySummary(): string {
-    const grantsQuery = data.grantsQuery;
-    const sortLabel = getSortLabel(data.filters.sort);
-
-    if (grantsQuery?.mode === 'calendar-year' && grantsQuery.year !== null) {
-      return `Calendar year ${grantsQuery.year}, sorted by ${sortLabel}.`;
-    }
-
-    return `Sorted by ${sortLabel}.`;
-  }
-
-  function getTotalMatchedCapital(matches: GrantMatch[]): number {
-    return matches.reduce((total, match) => total + (match.amount ?? 0), 0);
-  }
-
-  function getOpportunityTitle(match: GrantMatch): string {
-    return (
-      match.grant.prog_name_en ??
-      match.grant.agreement_title_en ??
-      match.grant.recipient_legal_name ??
-      'Funding opportunity'
+  async function hydrateSemanticOpportunityScores() {
+    const historicalMatches = data.grants.map((grant) => scoreOpportunityGrantRecord(grant, persona));
+    const ruleMatches = data.innovation.records
+      .filter(isCurrentlyAvailableOpportunity)
+      .map((record) => scoreOpportunityBenefitRecord(record, persona, historicalMatches));
+    const scores = await fetchSemanticScoresForMatches(
+      getBackendApiUrl(data.innovation.endpoint),
+      persona,
+      ruleMatches,
+      'business-benefits'
     );
+
+    semanticScores = {
+      ...semanticScores,
+      ...scores
+    };
   }
 
-  function getOpportunitySponsor(match: GrantMatch): string {
-    return match.grant.owner_org_title ?? match.grant.recipient_legal_name ?? 'Sponsor unavailable';
+  function applyOpportunitySemanticScore(match: BenefitMatch, semanticScore: SemanticScore | undefined): BenefitMatch {
+    if (!semanticScore) {
+      return match;
+    }
+
+    const matchScore = Math.max(0, Math.min(100, Math.round(semanticScore.combined_score)));
+    const status =
+      matchScore >= LIKELY_MATCH_THRESHOLD
+        ? { label: 'Likely match', tone: 'likely' as const }
+        : matchScore >= 55
+          ? { label: 'Worth review', tone: 'review' as const }
+          : { label: 'Low confidence', tone: 'low' as const };
+
+    return {
+      ...match,
+      matchScore,
+      statusLabel: status.label,
+      statusTone: status.tone,
+      reasons: unique([...semanticScore.reasons, ...match.reasons]).slice(0, 4)
+    };
   }
 
-  function getOpportunityDescription(match: GrantMatch): string {
-    return (
-      match.grant.description_en ??
-      match.grant.expected_results_en ??
-      match.grant.prog_purpose_en ??
+  function getBackendApiUrl(endpoint: string | null): string {
+    try {
+      return endpoint ? new URL(endpoint).origin : DEFAULT_BACKEND_API_URL;
+    } catch {
+      return DEFAULT_BACKEND_API_URL;
+    }
+  }
+
+  function getOpportunityRef(record: GenericRecord): string | null {
+    const field = findField(record, idFields);
+    const ref = field ? valueToString(field.value).trim() : '';
+    return ref && ref !== 'Unavailable' ? `${field?.key}:${ref}` : null;
+  }
+
+  function getBenefitMatchRef(match: BenefitMatch): string | null {
+    const recordRef = getOpportunityRef(match.record);
+    if (recordRef) {
+      return recordRef;
+    }
+
+    return `title:${getOpportunityTitle(match)}|${getOpportunitySponsor(match)}`;
+  }
+
+  function getOpportunityTitle(match: BenefitMatch): string {
+    return getRecordFieldValue(match.record, titleFields) ?? 'Funding opportunity';
+  }
+
+  function getOpportunitySponsor(match: BenefitMatch): string {
+    return getRecordFieldValue(match.record, subtitleFields) ?? 'Program source unavailable';
+  }
+
+  function getOpportunityDescription(match: BenefitMatch): string {
+    const description =
+      getRecordFieldValue(match.record, ['description', 'description_en', 'summary', 'details', 'objective', 'eligibility']) ??
       match.reasons[0] ??
-      'Review the source record to confirm applicant type, eligible activities, and application timing.'
-    );
+      'Review the source record to confirm applicant type, eligible activities, and application timing.';
+
+    return description.length > 240 ? `${description.slice(0, 237)}...` : description;
   }
 
-  function getOpportunityTags(match: GrantMatch): string[] {
+  function getOpportunityTags(match: BenefitMatch): string[] {
     const sponsor = getOpportunitySponsor(match).toLowerCase();
     const jurisdiction = sponsor.includes('canada') || sponsor.includes('federal') ? 'Federal' : 'Program';
     const activity = selectedActivities[0];
     const activityLabel = activityOptions.find((option) => option.value === activity)?.label;
     const industryLabel = industryOptions.find((option) => option.value === persona.industry)?.label;
 
-    return unique([jurisdiction, industryLabel, activityLabel].filter((value): value is string => Boolean(value)));
+    return unique([
+      jurisdiction,
+      industryLabel,
+      activityLabel,
+      match.historicalEvidenceCount > 0 ? 'Historical signal' : null
+    ].filter((value): value is string => Boolean(value)));
   }
 
-  function getFundingLabel(match: GrantMatch): string {
-    return match.amount === null ? 'Value unavailable' : moneyFormatter.format(match.amount);
+  function getFundingLabel(match: BenefitMatch): string {
+    if (match.potentialFunding === null) {
+      return 'Funding amount unavailable';
+    }
+
+    return moneyFormatter.format(match.potentialFunding);
   }
 
-  function getDeadlineLabel(match: GrantMatch): string {
-    if (match.grant.agreement_end_date) {
-      return formatDate(match.grant.agreement_end_date);
-    }
+  function getFundingSourceLabel(match: BenefitMatch): string {
+    return match.amount !== null ? 'Published amount' : match.estimatedAmount !== null ? 'Historical median estimate' : 'Not available';
+  }
 
-    if (match.grant.agreement_start_date) {
-      return `${formatDate(match.grant.agreement_start_date)} start`;
-    }
-
-    return 'Rolling';
+  function getDeadlineLabel(match: BenefitMatch): string {
+    const dateValue = getRecordFieldValue(match.record, dateFields);
+    return dateValue ? formatDate(dateValue) : 'Rolling';
   }
 
   function getFitLabel(score: number): string {
@@ -1037,27 +1717,24 @@
     return 'text-emerald-700';
   }
 
-  function getInsightSignals(match: GrantMatch): string[] {
+  function getInsightSignals(match: BenefitMatch): string[] {
     return (match.reasons.length > 0 ? match.reasons : match.nextActions).slice(0, 3);
   }
 
+  function loadMoreOpportunities() {
+    visibleOpportunityTarget = Math.min(sortedBenefitMatches.length, visibleOpportunityTarget + OPPORTUNITY_PAGE_SIZE);
+  }
+
   function getSortHref(sort: SortMode): string {
-    const params = new URLSearchParams({
-      count: data.filters.count.toString(),
-      sort
-    });
-
-    if (data.filters.year !== null) {
-      params.set('year', data.filters.year.toString());
-    }
-
-    return `/dashboard/persona/matches?${params.toString()}`;
+    const params = new URLSearchParams(page.url.searchParams);
+    params.set('sort', sort);
+    return `${page.url.pathname}?${params.toString()}`;
   }
 </script>
 
 <svelte:head>
   <title>Opportunity Matches | FundRadar</title>
-  <meta name="description" content="Review ranked grant opportunities and saved applications with FundRadar." />
+  <meta name="description" content="Review active funding benefits ranked with historical funding signals in FundRadar." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
   <link
@@ -1065,6 +1742,39 @@
     rel="stylesheet"
   />
 </svelte:head>
+
+<svelte:window onkeydown={handleAnalysisModalKeydown} />
+
+{#snippet opportunityAnalysisPanel(analysis: OpportunityAnalysis)}
+  <section class="rounded-lg border border-emerald-100 bg-emerald-50/80 p-4 text-sm text-[#25302a]" aria-label="Opportunity fit analysis">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <p class="m-0 text-xs font-black tracking-normal text-emerald-700 uppercase">Fit analysis</p>
+      <span class="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-[#45464d] uppercase">{analysis.confidence} confidence</span>
+    </div>
+    <p class="m-0 mt-2 leading-6 text-[#25302a]">{analysis.fit_summary}</p>
+
+    <div class="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+      {@render analysisList('Eligibility signals', analysis.eligibility_flags)}
+      {@render analysisList('Missing info', analysis.missing_company_info)}
+      {@render analysisList('Next steps', analysis.application_steps)}
+      {@render analysisList('Risks', analysis.risk_notes)}
+      {@render analysisList('Questions', analysis.questions_to_answer)}
+    </div>
+  </section>
+{/snippet}
+
+{#snippet analysisList(title: string, items: string[])}
+  {#if items.length > 0}
+    <div class="rounded-lg border border-emerald-100 bg-white/75 p-3">
+      <h4 class="m-0 text-[11px] font-black text-[#45464d] uppercase">{title}</h4>
+      <ul class="m-0 mt-2 grid list-none gap-1.5 p-0 leading-5 text-[#45464d]">
+        {#each items as item (item)}
+          <li class="relative pl-4 before:absolute before:left-0 before:text-emerald-700 before:content-['-']">{item}</li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
+{/snippet}
 
 <div class={pageShellClass}>
   <WorkspaceSidebar active="matches" />
@@ -1090,66 +1800,30 @@
             <p class={eyebrowClass}>FundRadar discovery</p>
             <h2 id="matches-heading" class="m-0 text-3xl leading-tight text-[#191c1e]">Opportunity Matches</h2>
             <p class="mt-2 max-w-[72ch] leading-7 text-[#45464d]">
-              Based on {applicantName}'s profile, FundRadar ranked grants by fit, funding size,
-              location, and profile keyword signals.
+              Based on {applicantName}'s profile, FundRadar ranks active benefits by fit, funding size,
+              location, profile keywords, and historical award signals.
             </p>
-            <p class="mt-4 break-words text-sm text-[#52615c]">{getGrantQuerySummary()}</p>
           </div>
 
-          <div class="flex flex-wrap items-center gap-1.5 rounded-full border border-slate-200 bg-white p-1.5" aria-label="Sort opportunities">
-            <span class="px-2 text-xs font-bold text-[#45464d] uppercase">Sort by</span>
-            <a class={data.filters.sort === 'score' ? sortLinkActiveClass : sortLinkClass} href={getSortHref('score')}>
+          <div
+            class="inline-flex flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+            aria-label="Sort opportunities"
+          >
+            <span class="px-2 text-xs font-black tracking-normal text-[#45464d] uppercase">Sort by</span>
+            <a class={activeSort === 'score' ? sortLinkActiveClass : sortLinkClass} href={getSortHref('score')}>
               Relevance
             </a>
-            <a class={data.filters.sort === 'amount' ? sortLinkActiveClass : sortLinkClass} href={getSortHref('amount')}>
+            <a class={activeSort === 'amount' ? sortLinkActiveClass : sortLinkClass} href={getSortHref('amount')}>
               Amount
             </a>
-            <a class={data.filters.sort === 'newest' ? sortLinkActiveClass : sortLinkClass} href={getSortHref('newest')}>
+            <a class={activeSort === 'newest' ? sortLinkActiveClass : sortLinkClass} href={getSortHref('newest')}>
               Deadline
             </a>
           </div>
         </div>
 
-        <form class="grid grid-cols-[minmax(120px,0.8fr)_minmax(110px,0.7fr)_auto] items-end gap-3 rounded-lg border border-slate-200 bg-white p-4 max-lg:grid-cols-2 max-md:grid-cols-1" method="GET" aria-label="Company grant filters">
-          <label class={filterFieldClass}>
-            <span>Year</span>
-            <input
-              class={filterInputClass}
-              max="2200"
-              min="1800"
-              name="year"
-              oninput={(event) => {
-                selectedYear = event.currentTarget.value;
-              }}
-              placeholder="Any"
-              type="number"
-              value={activeYear}
-            />
-          </label>
-
-          <label class={filterFieldClass}>
-            <span>Count</span>
-            <input
-              class={filterInputClass}
-              max="100"
-              min="1"
-              name="count"
-              oninput={(event) => {
-                selectedCount = event.currentTarget.value;
-              }}
-              type="number"
-              value={activeCount}
-            />
-          </label>
-
-          <div class="flex flex-wrap gap-2 max-md:grid">
-            <button class={primaryButtonClass} type="submit">Apply</button>
-            <a class={secondaryButtonClass} href="/dashboard/persona/matches">Reset filters</a>
-          </div>
-        </form>
-
         <section>
-          <div class="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white p-4" aria-label="Grant match controls">
+          <div class="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white p-4" aria-label="Opportunity match controls">
             <label class="flex min-w-0 items-center gap-2 text-sm font-bold text-[#25302a]">
               <input class="h-4 w-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-700" bind:checked={likelyOnly} type="checkbox" />
               <span>Likely matches only</span>
@@ -1162,42 +1836,102 @@
               </div>
               <div class="grid min-w-20 rounded-lg bg-[#f2f4f6] px-3 py-2">
                 <dt class="text-[11px] font-black text-[#45464d] uppercase">Saved</dt>
-                <dd class="m-0 text-lg font-black text-[#006c49]">{savedGrantRefs.length}</dd>
+                <dd class="m-0 text-lg font-black text-[#006c49]">{savedOpportunityRefs.length}</dd>
               </div>
             </dl>
           </div>
 
-          {#if !grantsHydrated}
+          <div class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm text-[#45464d]" aria-label="LLM fit filter status">
+            <div class="min-w-0">
+              <p class="m-0 text-xs font-black tracking-normal text-emerald-700 uppercase">LLM fit filter</p>
+              {#if opportunityFitJudging}
+                <p class="m-0 mt-1 leading-6">Judging the visible opportunity batch against {applicantName}'s profile.</p>
+              {:else if opportunityFitFilterMessage}
+                <p class="m-0 mt-1 leading-6">{opportunityFitFilterMessage}</p>
+              {:else if opportunityFitFilterAvailable}
+                <p class="m-0 mt-1 leading-6">
+                  Gemini reviewed the visible batch and hid {llmExcludedVisibleMatches.length}
+                  {llmExcludedVisibleMatches.length === 1 ? ' weak fit' : ' weak fits'}.
+                </p>
+              {:else}
+                <p class="m-0 mt-1 leading-6">Waiting for visible matches before running the fit filter.</p>
+              {/if}
+            </div>
+
+            {#if opportunityFitFilterMessage}
+              <button class={compactButtonClass} type="button" onclick={retryOpportunityFitFilter}>
+                Retry filter
+              </button>
+            {:else if llmExcludedVisibleMatches.length > 0}
+              <label class="flex shrink-0 items-center gap-2 text-sm font-bold text-[#25302a]">
+                <input class="h-4 w-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-700" bind:checked={showLlmExcluded} type="checkbox" />
+                <span>Show LLM-excluded</span>
+              </label>
+            {/if}
+          </div>
+
+          {#if newLikelyOpportunityCount > 0}
+            <section class="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950" role="status">
+              <h3 class="m-0 font-bold">New likely opportunities found</h3>
+              <p class="m-0 mt-2 leading-6">
+                The Business Benefits Finder feed changed, so FundRadar refreshed active opportunities and found
+                {newLikelyOpportunityCount} newly likely {newLikelyOpportunityCount === 1 ? 'match' : 'matches'} for {applicantName}.
+              </p>
+            </section>
+          {/if}
+
+          {#if !opportunitiesHydrated}
             <section class={statePanelClass} role="status">
               <h2 class="m-0 text-xl leading-snug text-[#191c1e]">Loading opportunities</h2>
-              <p class="mt-2 text-sm leading-6 text-[#45464d]">Preparing the latest saved opportunity records.</p>
+              <p class="mt-2 text-sm leading-6 text-[#45464d]">Preparing active benefits and historical funding signals.</p>
             </section>
-          {:else if data.error}
+          {:else if data.innovation.error}
             <section class={statePanelClass} role="status">
               <h2 class="m-0 text-xl leading-snug text-[#191c1e]">Opportunities unavailable</h2>
-              <p class="mt-2 text-sm leading-6 text-[#45464d]">{data.error}</p>
+              <p class="mt-2 text-sm leading-6 text-[#45464d]">{data.innovation.error}</p>
             </section>
-          {:else if data.grants.length === 0}
+          {:else if activeBenefitRecords.length === 0}
             <section class={statePanelClass} role="status">
-              <h2 class="m-0 text-xl leading-snug text-[#191c1e]">No grants returned</h2>
-              <p class="mt-2 text-sm leading-6 text-[#45464d]">No grants are available for this selection.</p>
+              <h2 class="m-0 text-xl leading-snug text-[#191c1e]">No active benefits returned</h2>
+              <p class="mt-2 text-sm leading-6 text-[#45464d]">No active Business Benefits Finder records are available in this selection.</p>
             </section>
-          {:else if visibleGrantMatches.length === 0}
+          {:else if visibleCandidateBenefitMatches.length > 0 && visibleBenefitMatches.length === 0}
+            <section class={statePanelClass} role="status">
+              <h2 class="m-0 text-xl leading-snug text-[#191c1e]">Visible matches were filtered out</h2>
+              <p class="mt-2 text-sm leading-6 text-[#45464d]">
+                Gemini marked the current visible batch as weak fits for {applicantName}. Show excluded opportunities or load more results to continue reviewing.
+              </p>
+              <div class="mt-4 flex flex-wrap gap-2">
+                <button class={secondaryButtonClass} type="button" onclick={() => (showLlmExcluded = true)}>
+                  Show LLM-excluded
+                </button>
+                {#if canLoadMoreOpportunities}
+                  <button class={secondaryButtonClass} type="button" onclick={loadMoreOpportunities}>
+                    Load 10 more
+                  </button>
+                {/if}
+              </div>
+            </section>
+          {:else if visibleBenefitMatches.length === 0}
             <section class={statePanelClass} role="status">
               <h2 class="m-0 text-xl leading-snug text-[#191c1e]">No likely matches yet</h2>
-              <p class="mt-2 text-sm leading-6 text-[#45464d]">Broaden the company keywords or turn off the likely-only filter to review all grants.</p>
+              <p class="mt-2 text-sm leading-6 text-[#45464d]">Broaden the company keywords or turn off the likely-only filter to review all active benefits.</p>
             </section>
           {:else}
             <section class="grid grid-cols-12 gap-6" aria-label="Ranked opportunity matches">
               {#if topOpportunity}
-                {@const topGrantRef = getGrantRef(topOpportunity.grant)}
-                {@const topGrantSaved = topGrantRef ? savedGrantRefSet.has(topGrantRef) : false}
-                <article class="col-span-8 grid min-h-[360px] grid-cols-[minmax(0,1fr)_260px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_4px_20px_rgba(0,0,0,0.03)] max-[1080px]:col-span-full max-[1080px]:grid-cols-[minmax(0,1fr)_230px] max-[760px]:grid-cols-1">
+                {@const topOpportunityRef = getOpportunityRef(topOpportunity.record)}
+                {@const topOpportunitySaved = topOpportunityRef ? savedOpportunityRefSet.has(topOpportunityRef) : false}
+                {@const topOpportunityAnalysisLoading = isOpportunityAnalysisLoading(topOpportunity)}
+                <article class={`col-span-8 grid min-h-[360px] grid-cols-[minmax(0,1fr)_260px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_4px_20px_rgba(0,0,0,0.03)] max-[1080px]:col-span-full max-[1080px]:grid-cols-[minmax(0,1fr)_230px] max-[760px]:grid-cols-1 ${isLlmExcludedOpportunity(topOpportunity) ? 'opacity-75' : ''}`}>
                   <div class="grid gap-4 p-7">
                     <div class="flex flex-wrap gap-1.5">
                       {#each getOpportunityTags(topOpportunity) as tag (tag)}
                         <span class="rounded-full bg-[#eceef0] px-2.5 py-1.5 text-xs leading-none font-black text-[#45464d] uppercase first:bg-[#131b2e] first:text-[#dae2fd]">{tag}</span>
                       {/each}
+                      {#if getOpportunityFitBadgeLabel(topOpportunity)}
+                        <span class={getOpportunityFitBadgeClass(topOpportunity)}>{getOpportunityFitBadgeLabel(topOpportunity)}</span>
+                      {/if}
                     </div>
 
                     <h3 class="m-0 text-3xl leading-tight text-[#191c1e]">{getOpportunityTitle(topOpportunity)}</h3>
@@ -1208,18 +1942,29 @@
                       <div>
                         <p class="m-0 text-xs font-black text-[#45464d] uppercase">Potential funding</p>
                         <strong class="mt-1 block text-2xl text-[#006c49]">{getFundingLabel(topOpportunity)}</strong>
+                        <span class="mt-1 block text-xs font-bold text-[#45464d]">{getFundingSourceLabel(topOpportunity)}</span>
                       </div>
-                      <button
-                        aria-pressed={topGrantSaved}
-                        class={`rounded-lg border px-4 py-3 leading-none font-black text-white disabled:cursor-not-allowed disabled:border-[#c6c6cd] disabled:bg-[#eceef0] disabled:text-[#76777d] ${
-                          topGrantSaved ? 'border-[#131b2e] bg-[#131b2e]' : 'border-emerald-700 bg-emerald-700 hover:bg-emerald-800'
-                        }`}
-                        disabled={!topGrantRef}
-                        type="button"
-                        onclick={() => toggleGrantSaved(topOpportunity.grant)}
-                      >
-                        {topGrantSaved ? 'Saved' : 'Save opportunity'}
-                      </button>
+                      <div class="flex flex-wrap justify-end gap-2 max-[760px]:justify-stretch">
+                        <button
+                          aria-busy={topOpportunityAnalysisLoading}
+                          class={`${secondaryButtonClass} ${topOpportunityAnalysisLoading ? 'cursor-wait opacity-80' : ''}`}
+                          type="button"
+                          onclick={() => openOpportunityAnalysisModal(topOpportunity)}
+                        >
+                          {getOpportunityAnalysisButtonLabel(topOpportunity)}
+                        </button>
+                        <button
+                          aria-pressed={topOpportunitySaved}
+                          class={`rounded-lg border px-4 py-3 leading-none font-black text-white disabled:cursor-not-allowed disabled:border-[#c6c6cd] disabled:bg-[#eceef0] disabled:text-[#76777d] ${
+                            topOpportunitySaved ? 'border-[#131b2e] bg-[#131b2e]' : 'border-emerald-700 bg-emerald-700 hover:bg-emerald-800'
+                          }`}
+                          disabled={!topOpportunityRef}
+                          type="button"
+                          onclick={() => toggleOpportunitySaved(topOpportunity)}
+                        >
+                          {topOpportunitySaved ? 'Saved' : 'Save opportunity'}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -1251,12 +1996,17 @@
 
               <aside class={`relative col-span-4 grid content-start gap-4 overflow-hidden rounded-lg border border-slate-200 bg-[#0b1c30] p-7 text-white ${cardShadowClass} max-[1080px]:col-span-full`}>
                 <h3 class="relative m-0 text-2xl leading-snug text-white">Profile Strength</h3>
-                <p class="relative m-0 leading-6 text-[#dae2fd]/80">Your profile is {personaCompleteness}% complete, which improves match confidence for available grants.</p>
+                <p class="relative m-0 leading-6 text-[#dae2fd]/80">Your profile is {personaCompleteness}% complete, which improves match confidence for active benefits.</p>
 
                 <div class="relative grid gap-2 rounded-lg border border-white/10 bg-[#131b2e]/70 p-3.5">
-                  <span class="text-xs font-black text-[#dae2fd]/70 uppercase">Data points analyzed</span>
-                  <strong class="text-3xl">{data.grants.length}</strong>
+                  <span class="text-xs font-black text-[#dae2fd]/70 uppercase">Active benefits analyzed</span>
+                  <strong class="text-3xl">{activeBenefitRecords.length}</strong>
                   <div class="h-2 overflow-hidden rounded-full bg-white/15"><span class={`block h-full rounded-full bg-emerald-400 ${getCompletenessWidthClass(personaCompleteness)}`}></span></div>
+                </div>
+
+                <div class="relative grid gap-2 rounded-lg border border-white/10 bg-[#131b2e]/70 p-3.5">
+                  <span class="text-xs font-black text-[#dae2fd]/70 uppercase">Historical funding signals</span>
+                  <strong class="text-3xl">{historicalEvidenceCount}</strong>
                 </div>
 
                 <div class="relative grid gap-2 rounded-lg border border-white/10 bg-[#131b2e]/70 p-3.5">
@@ -1265,15 +2015,19 @@
                 </div>
               </aside>
 
-              {#each remainingOpportunities as match (match.grant._id)}
-                {@const grantRef = getGrantRef(match.grant)}
-                {@const grantSaved = grantRef ? savedGrantRefSet.has(grantRef) : false}
-                <article class={`col-span-4 grid min-h-80 gap-4 rounded-lg border border-slate-200 bg-white p-6 ${cardShadowClass} transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] max-[1080px]:col-span-full`}>
+              {#each remainingOpportunities as match, index (getOpportunityRef(match.record) ?? `opportunity-${index}`)}
+                {@const opportunityRef = getOpportunityRef(match.record)}
+                {@const opportunitySaved = opportunityRef ? savedOpportunityRefSet.has(opportunityRef) : false}
+                {@const opportunityAnalysisLoading = isOpportunityAnalysisLoading(match)}
+                <article class={`col-span-4 grid min-h-80 gap-4 rounded-lg border border-slate-200 bg-white p-6 ${cardShadowClass} transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] max-[1080px]:col-span-full ${isLlmExcludedOpportunity(match) ? 'opacity-75' : ''}`}>
                   <div class="flex items-start justify-between gap-4">
                     <div class="flex flex-wrap gap-1.5">
                       {#each getOpportunityTags(match).slice(0, 2) as tag (tag)}
                         <span class="rounded-full bg-[#eceef0] px-2.5 py-1.5 text-xs leading-none font-black text-[#45464d] uppercase first:bg-[#131b2e] first:text-[#dae2fd]">{tag}</span>
                       {/each}
+                      {#if getOpportunityFitBadgeLabel(match)}
+                        <span class={getOpportunityFitBadgeClass(match)}>{getOpportunityFitBadgeLabel(match)}</span>
+                      {/if}
                     </div>
 
                     <div class={`relative grid h-14 w-14 shrink-0 place-items-center ${getMatchStrokeClass(match.matchScore)}`} aria-label={`${match.matchScore} percent match`}>
@@ -1299,6 +2053,7 @@
                     <div class="grid gap-1">
                       <span class="text-[11px] font-black text-[#45464d] uppercase">Amount</span>
                       <strong class="text-sm text-[#191c1e]">{getFundingLabel(match)}</strong>
+                      <small class="text-xs text-[#45464d]">{getFundingSourceLabel(match)}</small>
                     </div>
                     <div class="grid gap-1">
                       <span class="text-[11px] font-black text-[#45464d] uppercase">Deadline</span>
@@ -1306,67 +2061,83 @@
                     </div>
                   </div>
 
-                  <button
-                    aria-pressed={grantSaved}
-                    class={`rounded-lg border px-4 py-3 leading-none font-black text-white disabled:cursor-not-allowed disabled:border-[#c6c6cd] disabled:bg-[#eceef0] disabled:text-[#76777d] ${
-                      grantSaved ? 'border-[#131b2e] bg-[#131b2e]' : 'border-emerald-700 bg-emerald-700 hover:bg-emerald-800'
-                    }`}
-                    disabled={!grantRef}
-                    type="button"
-                    onclick={() => toggleGrantSaved(match.grant)}
-                  >
-                    {grantSaved ? 'Saved' : 'Save'}
-                  </button>
+                  <div class="grid grid-cols-2 gap-2 max-[480px]:grid-cols-1">
+                    <button
+                      aria-busy={opportunityAnalysisLoading}
+                      class={`${secondaryButtonClass} ${opportunityAnalysisLoading ? 'cursor-wait opacity-80' : ''}`}
+                      type="button"
+                      onclick={() => openOpportunityAnalysisModal(match)}
+                    >
+                      {getOpportunityAnalysisButtonLabel(match)}
+                    </button>
+                    <button
+                      aria-pressed={opportunitySaved}
+                      class={`rounded-lg border px-4 py-3 leading-none font-black text-white disabled:cursor-not-allowed disabled:border-[#c6c6cd] disabled:bg-[#eceef0] disabled:text-[#76777d] ${
+                        opportunitySaved ? 'border-[#131b2e] bg-[#131b2e]' : 'border-emerald-700 bg-emerald-700 hover:bg-emerald-800'
+                      }`}
+                      disabled={!opportunityRef}
+                      type="button"
+                      onclick={() => toggleOpportunitySaved(match)}
+                    >
+                      {opportunitySaved ? 'Saved' : 'Save'}
+                    </button>
+                  </div>
                 </article>
               {/each}
             </section>
+
+            {#if canLoadMoreOpportunities}
+              <div class="mt-6 flex justify-center">
+                <button class={secondaryButtonClass} type="button" onclick={loadMoreOpportunities}>
+                  Load 10 more
+                </button>
+              </div>
+            {/if}
           {/if}
 
           <section class="mt-8 rounded-lg border border-slate-200 bg-white p-6 shadow-[0_4px_20px_rgba(0,0,0,0.03)]" aria-labelledby="shortlist-heading">
             <div class="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4">
               <div>
                 <p class={eyebrowClass}>Shortlist</p>
-                <h2 id="shortlist-heading" class="m-0 text-2xl leading-tight text-[#191c1e]">Compare saved grants</h2>
+                <h2 id="shortlist-heading" class="m-0 text-2xl leading-tight text-[#191c1e]">Compare saved opportunities</h2>
               </div>
 
               <dl class="m-0">
                 <div class="grid min-w-20 rounded-lg bg-[#f2f4f6] px-3 py-2">
                   <dt class="text-[11px] font-black text-[#45464d] uppercase">Saved</dt>
-                  <dd class="m-0 text-lg font-black text-[#006c49]">{savedGrantRefs.length}</dd>
+                  <dd class="m-0 text-lg font-black text-[#006c49]">{savedOpportunityRefs.length}</dd>
                 </div>
               </dl>
             </div>
 
-            {#if savedGrantRefs.length === 0}
-              <p class="m-0 py-8 text-sm leading-6 text-[#45464d]">No grants saved yet.</p>
+            {#if savedOpportunityRefs.length === 0}
+              <p class="m-0 py-8 text-sm leading-6 text-[#45464d]">No opportunities saved yet.</p>
             {:else}
-              <div class="grid gap-0 overflow-hidden rounded-lg border border-slate-200" aria-label="Saved grant comparison">
+              <div class="grid gap-0 overflow-hidden rounded-lg border border-slate-200" aria-label="Saved opportunity comparison">
                 <div class="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.6fr_auto] gap-4 bg-[#f2f4f6] px-4 py-3 text-xs font-black text-[#45464d] uppercase max-[840px]:hidden">
-                  <span>Grant</span>
+                  <span>Opportunity</span>
                   <span>Program</span>
                   <span>Amount</span>
                   <span>Fit</span>
                   <span>Action</span>
                 </div>
 
-                {#each shortlistedGrants as item (item.ref)}
+                {#each shortlistedOpportunities as item (item.ref)}
                   {#if item.match}
-                    {@const grant = item.match.grant}
                     <div class="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.6fr_auto] gap-4 border-t border-slate-200 px-4 py-4 first:border-t-0 max-[840px]:grid-cols-1">
                       <div class="grid gap-1">
-                        <span class="hidden text-[11px] font-black text-[#45464d] uppercase max-[840px]:block">Grant</span>
-                        <strong class="text-sm text-[#191c1e]">{grant.recipient_legal_name ?? 'Recipient unavailable'}</strong>
-                        <small class="break-words text-xs text-[#45464d]">{item.ref}</small>
+                        <span class="hidden text-[11px] font-black text-[#45464d] uppercase max-[840px]:block">Opportunity</span>
+                        <strong class="text-sm text-[#191c1e]">{getOpportunityTitle(item.match)}</strong>
                       </div>
                       <div class="grid gap-1">
                         <span class="hidden text-[11px] font-black text-[#45464d] uppercase max-[840px]:block">Program</span>
-                        <span class="text-sm text-[#191c1e]">{grant.prog_name_en ?? 'Program unavailable'}</span>
-                        <small class="text-xs text-[#45464d]">{grant.owner_org_title ?? 'Organization unavailable'}</small>
+                        <span class="text-sm text-[#191c1e]">{getOpportunitySponsor(item.match)}</span>
+                        <small class="text-xs text-[#45464d]">{item.match.historicalEvidenceCount} historical signals</small>
                       </div>
                       <div class="grid gap-1">
                         <span class="hidden text-[11px] font-black text-[#45464d] uppercase max-[840px]:block">Amount</span>
-                        <strong class="text-sm text-[#191c1e]">{formatMoney(grant.agreement_value)}</strong>
-                        <small class="text-xs text-[#45464d]">{formatDate(grant.agreement_start_date)} start</small>
+                        <strong class="text-sm text-[#191c1e]">{getFundingLabel(item.match)}</strong>
+                        <small class="text-xs text-[#45464d]">{getFundingSourceLabel(item.match)}</small>
                       </div>
                       <div class="grid gap-1">
                         <span class="hidden text-[11px] font-black text-[#45464d] uppercase max-[840px]:block">Fit</span>
@@ -1377,7 +2148,7 @@
                         <button
                           class={compactButtonClass}
                           type="button"
-                          onclick={() => removeShortlistedGrant(item.ref)}
+                          onclick={() => removeShortlistedOpportunity(item.ref)}
                         >
                           Remove
                         </button>
@@ -1386,9 +2157,8 @@
                   {:else}
                     <div class="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.6fr_auto] gap-4 border-t border-slate-200 bg-slate-50 px-4 py-4 first:border-t-0 max-[840px]:grid-cols-1">
                       <div class="grid gap-1">
-                        <span class="hidden text-[11px] font-black text-[#45464d] uppercase max-[840px]:block">Grant</span>
-                        <strong class="text-sm text-[#191c1e]">Grant not in current results</strong>
-                        <small class="break-words text-xs text-[#45464d]">{item.ref}</small>
+                        <span class="hidden text-[11px] font-black text-[#45464d] uppercase max-[840px]:block">Opportunity</span>
+                        <strong class="text-sm text-[#191c1e]">Opportunity not in current results</strong>
                       </div>
                       <div><span class="text-sm text-[#45464d]">Program unavailable</span></div>
                       <div><span class="text-sm text-[#45464d]">Amount unavailable</span></div>
@@ -1397,7 +2167,7 @@
                         <button
                           class={compactButtonClass}
                           type="button"
-                          onclick={() => removeShortlistedGrant(item.ref)}
+                          onclick={() => removeShortlistedOpportunity(item.ref)}
                         >
                           Remove
                         </button>
@@ -1420,4 +2190,90 @@
     </div>
   </main>
 </div>
+
+{#if analysisModalMatch}
+  {@const modalMatch = analysisModalMatch}
+  <div
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-[#0b1c30]/60 p-4 backdrop-blur-sm"
+    role="presentation"
+    onclick={handleAnalysisBackdropClick}
+  >
+    <div
+      aria-labelledby="fit-analysis-modal-title"
+      aria-modal="true"
+      class="grid max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]"
+      role="dialog"
+    >
+      <header class="flex items-start justify-between gap-4 border-b border-slate-200 bg-[#f7f9fb] p-5">
+        <div class="min-w-0">
+          <p class={eyebrowClass}>Opportunity fit</p>
+          <h2 id="fit-analysis-modal-title" class="m-0 text-2xl leading-tight text-[#191c1e]">{getOpportunityTitle(modalMatch)}</h2>
+          <p class="m-0 mt-1 text-sm font-black text-[#006c49] uppercase">{getOpportunitySponsor(modalMatch)}</p>
+        </div>
+
+        <button
+          aria-label="Close fit analysis"
+          class="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white leading-none text-[#191c1e] hover:bg-slate-100"
+          type="button"
+          onclick={closeOpportunityAnalysisModal}
+        >
+          <span class="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
+        </button>
+      </header>
+
+      <div class="grid gap-4 overflow-y-auto p-5">
+        <div class="grid grid-cols-3 gap-3 max-[640px]:grid-cols-1" aria-label="Selected opportunity summary">
+          <div class="rounded-lg border border-slate-200 bg-[#f2f4f6] p-3">
+            <span class="text-[11px] font-black text-[#45464d] uppercase">Match</span>
+            <strong class="mt-1 block text-2xl text-[#006c49]">{modalMatch.matchScore}%</strong>
+            <small class="text-xs text-[#45464d]">{modalMatch.statusLabel}</small>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-[#f2f4f6] p-3">
+            <span class="text-[11px] font-black text-[#45464d] uppercase">Funding</span>
+            <strong class="mt-1 block text-lg text-[#191c1e]">{getFundingLabel(modalMatch)}</strong>
+            <small class="text-xs text-[#45464d]">{getFundingSourceLabel(modalMatch)}</small>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-[#f2f4f6] p-3">
+            <span class="text-[11px] font-black text-[#45464d] uppercase">Deadline</span>
+            <strong class="mt-1 block text-lg text-[#191c1e]">{getDeadlineLabel(modalMatch)}</strong>
+          </div>
+        </div>
+
+        <p class="m-0 leading-7 text-[#45464d]">{getOpportunityDescription(modalMatch)}</p>
+
+        {#if analysisModalLoading}
+          <section class="rounded-lg border border-emerald-100 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950" role="status">
+            Analyzing the selected opportunity against {applicantName}'s company profile.
+          </section>
+        {/if}
+
+        {#if analysisModalAnalysis}
+          {@render opportunityAnalysisPanel(analysisModalAnalysis)}
+        {:else if analysisModalError}
+          <section class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-800" role="alert">
+            {analysisModalError}
+          </section>
+        {:else if !analysisModalLoading}
+          <section class="rounded-lg border border-slate-200 bg-[#f7f9fb] p-4 text-sm leading-6 text-[#45464d]" role="status">
+            Fit analysis is ready to run for this opportunity.
+          </section>
+        {/if}
+      </div>
+
+      <footer class="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-[#f7f9fb] p-5">
+        <button class={secondaryButtonClass} type="button" onclick={closeOpportunityAnalysisModal}>
+          Close
+        </button>
+        <button
+          class="inline-flex items-center justify-center rounded-lg border border-emerald-700 bg-emerald-700 px-3.5 py-3 leading-none font-extrabold text-white no-underline hover:border-emerald-800 hover:bg-emerald-800 focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-emerald-200 disabled:cursor-wait disabled:border-slate-300 disabled:bg-white disabled:text-[#45464d] disabled:opacity-100"
+          disabled={analysisModalLoading}
+          type="button"
+          onclick={refreshOpportunityAnalysisModal}
+        >
+          {analysisModalAnalysis ? 'Refresh analysis' : analysisModalError ? 'Retry analysis' : 'Analyze fit'}
+        </button>
+      </footer>
+    </div>
+  </div>
+{/if}
 </div>

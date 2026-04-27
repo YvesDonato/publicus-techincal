@@ -15,6 +15,7 @@ import httpx
 
 
 BUSINESS_BENEFITS_DATASET_ID = "4e75337e-70d0-4ed7-92d1-3b85192ec6b1"
+BUSINESS_BENEFITS_ATOM_FEED = f"https://open.canada.ca/data/en/feeds/dataset/{BUSINESS_BENEFITS_DATASET_ID}.atom"
 CKAN_API_BASE = "https://open.canada.ca/data/api/3/action"
 INNOVATION_BASE_URL = "https://innovation.ised-isde.canada.ca"
 INNOVATION_LIST_PATH = "/s/list-liste"
@@ -51,6 +52,7 @@ CATEGORY_ALIASES = {
 
 SPREADSHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 NS = {"m": SPREADSHEET_NS}
+ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 CELL_REFERENCE_RE = re.compile(r"([A-Z]+)")
 
 HEADER_ALIASES = {
@@ -216,6 +218,89 @@ def latest_xlsx_resource(package: dict[str, Any]) -> dict[str, Any]:
     if not resources:
         raise RuntimeError("No XLSX Business Benefits Finder resource found.")
     return max(resources, key=lambda resource: int(resource.get("position") or 0))
+
+
+def atom_text(element: ET.Element | None, path: str) -> str | None:
+    if element is None:
+        return None
+
+    child = element.find(path, ATOM_NS)
+    if child is None or child.text is None:
+        return None
+
+    value = normalize_text(child.text)
+    return value or None
+
+
+def atom_link(element: ET.Element | None) -> str | None:
+    if element is None:
+        return None
+
+    alternate_link = None
+    for link in element.findall("atom:link", ATOM_NS):
+        href = link.get("href")
+        if not href:
+            continue
+        if link.get("rel") == "alternate":
+            return href
+        alternate_link = alternate_link or href
+
+    return alternate_link
+
+
+def dataset_update_feed(client: httpx.Client) -> dict[str, Any]:
+    package = package_show(client)
+    resource = latest_xlsx_resource(package)
+    response = client.get(
+        BUSINESS_BENEFITS_ATOM_FEED,
+        headers={"Accept": "application/atom+xml, application/xml, text/xml, */*"},
+    )
+    response.raise_for_status()
+
+    try:
+        root = ET.fromstring(response.content)
+    except ET.ParseError as exc:
+        raise RuntimeError("Could not parse the Business Benefits Finder Atom feed.") from exc
+
+    entries = root.findall("atom:entry", ATOM_NS)
+    latest_entry = entries[0] if entries else None
+    latest_entry_payload = (
+        {
+            "id": atom_text(latest_entry, "atom:id"),
+            "title": atom_text(latest_entry, "atom:title"),
+            "updated": atom_text(latest_entry, "atom:updated"),
+            "link": atom_link(latest_entry),
+        }
+        if latest_entry is not None
+        else None
+    )
+    latest_resource = {
+        "id": resource.get("id"),
+        "name": resource.get("name"),
+        "url": resource.get("url"),
+        "created": resource.get("created"),
+        "last_modified": resource.get("last_modified"),
+    }
+    marker_parts = [
+        package.get("metadata_modified"),
+        latest_entry_payload.get("id") if latest_entry_payload else None,
+        latest_entry_payload.get("updated") if latest_entry_payload else None,
+        latest_resource.get("id"),
+        latest_resource.get("last_modified"),
+        latest_resource.get("url"),
+    ]
+    marker = "|".join(str(part) for part in marker_parts if part)
+
+    return {
+        "dataset_id": BUSINESS_BENEFITS_DATASET_ID,
+        "dataset_title": package.get("title"),
+        "dataset_modified": package.get("metadata_modified"),
+        "feed_url": BUSINESS_BENEFITS_ATOM_FEED,
+        "feed_updated": atom_text(root, "atom:updated"),
+        "latest_entry": latest_entry_payload,
+        "latest_resource": latest_resource,
+        "marker": marker,
+    }
 
 
 def normalize_header(header: str) -> str:

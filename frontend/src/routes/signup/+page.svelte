@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { browser } from '$app/environment';
   import type { ActionData, PageData } from './$types';
 
   type SignUpValues = {
@@ -27,6 +28,19 @@
   const result = $derived((form ?? {}) as SignUpResult);
   const values = $derived(result.values ?? {});
   const loginHref = $derived(`/login?next=${encodeURIComponent(data.next)}`);
+  const COMPANY_ONBOARDING_PENDING_STORAGE_KEY = 'publicus.companyProfileOnboarding.pending.v1';
+
+  $effect(() => {
+    if (!browser || !result.message) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(COMPANY_ONBOARDING_PENDING_STORAGE_KEY, '1');
+    } catch {
+      // localStorage can be unavailable in private windows or locked-down browsers.
+    }
+  });
 </script>
 
 <svelte:head>
@@ -211,11 +225,6 @@
 
     <footer class="mt-auto flex flex-wrap items-center justify-center gap-4 border-t border-[#e0e3e5] pt-12 sm:justify-between">
       <span class="text-sm leading-5 text-[#45464d]">© 2026 FundRadar</span>
-      <div class="flex gap-6">
-        <a class="text-sm leading-5 text-[#45464d] no-underline transition hover:text-[#191c1e]" href="/">Privacy Policy</a>
-        <a class="text-sm leading-5 text-[#45464d] no-underline transition hover:text-[#191c1e]" href="/">Terms of Service</a>
-        <a class="text-sm leading-5 text-[#45464d] no-underline transition hover:text-[#191c1e]" href="/">Contact Support</a>
-      </div>
     </footer>
   </section>
 </div>

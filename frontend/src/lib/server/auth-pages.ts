@@ -77,6 +77,7 @@ export async function signUpAction({ locals, request, url }: AuthActionEvent) {
   const password = readString(formData, 'password');
   const profile = readSignUpProfile(formData);
   const next = readNextPath(formData, url);
+  const onboardingNext = buildCompanyOnboardingRedirectPath(next);
 
   if (!email || !password) {
     return fail(400, {
@@ -96,7 +97,7 @@ export async function signUpAction({ locals, request, url }: AuthActionEvent) {
     email,
     password,
     options: {
-      emailRedirectTo: `${url.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      emailRedirectTo: `${url.origin}/auth/callback?next=${encodeURIComponent(onboardingNext)}`,
       data: {
         full_name: profile.fullName,
         organization_name: profile.organizationName,
@@ -113,13 +114,25 @@ export async function signUpAction({ locals, request, url }: AuthActionEvent) {
   }
 
   if (data.session) {
-    redirect(303, next);
+    redirect(303, onboardingNext);
   }
 
   return {
     message: 'Account created. Check your email to confirm the account, then sign in.',
     values: { email, ...profile }
   };
+}
+
+function buildCompanyOnboardingRedirectPath(returnTo: string): string {
+  const params = new URLSearchParams({
+    onboarding: 'company-profile'
+  });
+
+  if (returnTo !== '/dashboard') {
+    params.set('return_to', returnTo);
+  }
+
+  return `/dashboard?${params.toString()}`;
 }
 
 function getAuthLocals(locals: App.Locals): AuthLocals {

@@ -2,11 +2,6 @@
   const heroImageUrl =
     'https://lh3.googleusercontent.com/aida-public/AB6AXuBcBVuPcgYNmKqVqxs-gdunb5xUGjHnKM-9iZbHUnteUi-NE5-57dW7NtovKD2C51ZUG5RCh78Aa2xuG-nUVfvD3BNj3PBqiixQMz57y4QK7It_xjaU5TV_pxT4SOEsiP3Mmquxg_usN5DJHKz3WMG2TAc8h_dKUc6eFd4nBys3VEC51R5TR9EgfcoFWGWlgcorQM9m1cAXHZmA0IR1hAd0DN8scuxjzCMZs2amb--_1NfynwtdAcBMn3WSyqzLO_eGKeicK5QY0R4y';
 
-  const metrics = [
-    { label: 'Funding Matched', value: '$50M+' },
-    { label: 'Active Programs', value: '200+' }
-  ];
-
   const features = [
     {
       icon: 'database',
@@ -72,7 +67,6 @@
       <nav class="hidden items-center gap-9 md:flex" aria-label="Primary navigation">
         <a class="text-sm font-semibold text-[#45464d] no-underline transition hover:text-[#191c1e]" href="#features">Features</a>
         <a class="text-sm font-semibold text-[#45464d] no-underline transition hover:text-[#191c1e]" href="#how-it-works">How it Works</a>
-        <a class="text-sm font-semibold text-[#45464d] no-underline transition hover:text-[#191c1e]" href="#pricing">Pricing</a>
       </nav>
 
       <div class="flex shrink-0 gap-2">
@@ -114,17 +108,6 @@
             Get Started for Free
           </a>
         </div>
-      </div>
-    </section>
-
-    <section class="mx-auto w-full max-w-[1280px] px-4 pb-12 md:px-6" aria-label="FundRadar statistics">
-      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {#each metrics as metric (metric.label)}
-          <article class="rounded-lg border border-[#e0e3e5] bg-[#eceef0] p-6 text-center shadow-sm">
-            <p class="m-0 text-sm font-black uppercase tracking-normal text-[#45464d]">{metric.label}</p>
-            <p class="m-0 mt-2 font-[Public_Sans] text-4xl font-black leading-tight text-black">{metric.value}</p>
-          </article>
-        {/each}
       </div>
     </section>
 
@@ -189,25 +172,6 @@
       </div>
     </section>
 
-    <section id="pricing" class="mx-auto mb-16 w-full max-w-[1280px] px-4 md:px-6">
-      <div class="rounded-xl border border-[#c6c6cd] bg-white p-6 shadow-sm md:p-8">
-        <div class="grid gap-6 md:grid-cols-[1fr_auto] md:items-center">
-          <div>
-            <p class="m-0 mb-2 text-xs font-black uppercase tracking-normal text-emerald-700">Pricing</p>
-            <h2 class="m-0 font-[Public_Sans] text-3xl font-black leading-tight text-[#191c1e]">Start with the workspace you already have.</h2>
-            <p class="m-0 mt-3 max-w-3xl text-base leading-7 text-[#45464d]">
-              Use FundRadar to create your profile, browse grants, and review ranked matches. Account-based persistence is powered by Supabase.
-            </p>
-          </div>
-          <a
-            class="flex h-12 items-center justify-center rounded-lg border border-[#c6c6cd] px-6 text-sm font-black text-[#191c1e] no-underline transition hover:bg-[#eceef0]"
-            href="/login?next=%2Fdashboard"
-          >
-            View Dashboard
-          </a>
-        </div>
-      </div>
-    </section>
   </main>
 
   <footer class="mt-auto w-full border-t border-[#e0e3e5] bg-white py-8">

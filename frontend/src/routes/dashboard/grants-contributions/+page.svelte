@@ -19,6 +19,12 @@
     type CompanyProfile,
     type ScoredRecord
   } from '$lib/client/company-matching';
+  import {
+    applySemanticScore,
+    fetchSemanticScoresForMatches,
+    getSemanticRecordId,
+    type SemanticScoreMap
+  } from '$lib/client/semantic-scoring';
   import type { PageData } from './$types';
 
   type GrantRecord = {
@@ -75,6 +81,7 @@
     done: false
   });
   let profile = $state<CompanyProfile>(createEmptyCompanyProfile());
+  let semanticScores = $state<SemanticScoreMap>({});
   let hydrationSequence = 0;
   let lastHydratedRequestKey = $state<string | null>(null);
 
@@ -96,7 +103,12 @@
   const profileHasSignals = $derived(hasProfileSignals(profile));
   const applicantName = $derived(companyDisplayName(profile));
   const provinceOptions = $derived(getProvinceOptions(data.grantsResult.records));
-  const scoredGrantRecords = $derived(data.grantsResult.records.map((grant) => scoreGrantRecord(grant, profile)));
+  const ruleScoredGrantRecords = $derived(data.grantsResult.records.map((grant) => scoreGrantRecord(grant, profile)));
+  const scoredGrantRecords = $derived(
+    ruleScoredGrantRecords.map((match, index) =>
+      applySemanticScore(match, semanticScores[getSemanticRecordId(match.record, 'grants', index)])
+    )
+  );
   const profileMatchedGrantRecords = $derived(
     profileHasSignals
       ? scoredGrantRecords.filter((match) => match.matchScore >= REVIEW_MATCH_THRESHOLD)
@@ -167,6 +179,7 @@
     cacheHydrated = true;
     loadingGrants = false;
     lastHydratedRequestKey = requestKey;
+    void hydrateSemanticGrantScores(nextProfile, sequence);
   }
 
   async function loadMoreGrantMatches() {
@@ -190,6 +203,7 @@
 
     matchDisplayTarget = nextTarget;
     loadingGrants = false;
+    void hydrateSemanticGrantScores(profile, sequence);
   }
 
   async function loadGrantMatchesUntil(
@@ -269,6 +283,26 @@
         records
       }
     };
+  }
+
+  async function hydrateSemanticGrantScores(currentProfile: CompanyProfile, sequence: number) {
+    const ruleMatches = data.grantsResult.records.map((grant) => scoreGrantRecord(grant, currentProfile));
+    const candidates = hasProfileSignals(currentProfile)
+      ? ruleMatches.filter((match) => match.matchScore >= REVIEW_MATCH_THRESHOLD)
+      : ruleMatches;
+    const scores = await fetchSemanticScoresForMatches(
+      getBackendApiUrl(data.grantsResult.endpoint),
+      currentProfile,
+      candidates,
+      'grants'
+    );
+
+    if (sequence === hydrationSequence) {
+      semanticScores = {
+        ...semanticScores,
+        ...scores
+      };
+    }
   }
 
   function getAutoMatchCount(records: GrantRecord[], currentProfile: CompanyProfile): number {
@@ -387,6 +421,14 @@
 
   function getGrantKey(match: ScoredRecord<GrantRecord>, index: number): string | number {
     return match.record._id ?? match.record.ref_number ?? `grant-${index}`;
+  }
+
+  function getBackendApiUrl(endpoint: string): string {
+    try {
+      return new URL(endpoint).origin;
+    } catch {
+      return 'http://127.0.0.1:8000';
+    }
   }
 
   function getGrantDateValueFromRecord(grant: GrantRecord): number {

@@ -7,6 +7,16 @@
     type HydrationProgress
   } from '$lib/client/funding-cache';
   import {
+    fetchBusinessBenefitsFeedState,
+    getBusinessBenefitsFeedMarker,
+    readStoredBusinessBenefitsFeedState,
+    readStoredStringList,
+    shouldRefreshBusinessBenefitsCache,
+    writeStoredBusinessBenefitsFeedState,
+    writeStoredStringList
+  } from '$lib/client/business-benefits-updates';
+  import {
+    LIKELY_MATCH_THRESHOLD,
     REVIEW_MATCH_THRESHOLD,
     companyDisplayName,
     createEmptyCompanyProfile,
@@ -19,6 +29,12 @@
     type GenericRecord,
     type ScoredRecord
   } from '$lib/client/company-matching';
+  import {
+    applySemanticScore,
+    fetchSemanticScoresForMatches,
+    getSemanticRecordId,
+    type SemanticScoreMap
+  } from '$lib/client/semantic-scoring';
   import type { PageData } from './$types';
 
   type FieldMatch = {
@@ -66,12 +82,16 @@
     done: false
   });
   let profile = $state<CompanyProfile>(createEmptyCompanyProfile());
+  let semanticScores = $state<SemanticScoreMap>({});
   let hydrationSequence = 0;
   let lastHydratedRequestKey = $state<string | null>(null);
+  let newLikelyBenefitCount = $state(0);
 
   const MATCH_PAGE_SIZE = 50;
   const MATCH_LOAD_TIMEOUT_MS = 12000;
   const RECORD_SCAN_BATCH_SIZE = 500;
+  const DEFAULT_BACKEND_API_URL = 'http://127.0.0.1:8000';
+  const LIKELY_BENEFIT_REFS_STORAGE_KEY = 'fundradar.businessBenefitsFinderLikelyRefs.v1';
   const titleFields = [
     'title',
     'project_title',
@@ -120,7 +140,12 @@
   const applicantName = $derived(companyDisplayName(profile));
   const currentBenefitRecords = $derived(data.benefits.records.filter(isCurrentlyAvailableRecord));
   const availableFilterFields = $derived(getAvailableFilterFields(currentBenefitRecords));
-  const scoredBenefitRecords = $derived(currentBenefitRecords.map((record) => scoreBenefitRecord(record, profile)));
+  const ruleScoredBenefitRecords = $derived(currentBenefitRecords.map((record) => scoreBenefitRecord(record, profile)));
+  const scoredBenefitRecords = $derived(
+    ruleScoredBenefitRecords.map((match, index) =>
+      applySemanticScore(match, semanticScores[getSemanticRecordId(match.record, 'business-benefits', index)])
+    )
+  );
   const profileMatchedBenefitRecords = $derived(
     profileHasSignals
       ? scoredBenefitRecords.filter((match) => match.matchScore >= REVIEW_MATCH_THRESHOLD)
@@ -170,23 +195,38 @@
       done: false
     };
 
-    const nextProfile = await loadCompanyProfile();
+    const [nextProfile, feedState] = await Promise.all([
+      loadCompanyProfile(),
+      fetchBusinessBenefitsFeedState(getBackendApiUrl(snapshot.benefits.endpoint))
+    ]);
     if (sequence !== hydrationSequence) {
       return;
     }
 
+    const previousFeedState = readStoredBusinessBenefitsFeedState();
+    const forceBenefitsRefresh = shouldRefreshBusinessBenefitsCache(previousFeedState, feedState);
+    const canReportNewFeedMatches = forceBenefitsRefresh && getBusinessBenefitsFeedMarker(previousFeedState) !== null;
     profile = nextProfile;
     profileHydrated = true;
-    await withLoadingTimeout(loadBenefitMatchesUntil(snapshot, nextProfile, MATCH_PAGE_SIZE, sequence));
+    const benefitsHydrated = await withLoadingTimeout(
+      loadBenefitMatchesUntil(snapshot, nextProfile, MATCH_PAGE_SIZE, sequence, forceBenefitsRefresh)
+    );
 
     if (sequence !== hydrationSequence) {
       return;
     }
 
+    if (feedState && (!forceBenefitsRefresh || benefitsHydrated)) {
+      writeStoredBusinessBenefitsFeedState(feedState);
+    }
+    if (benefitsHydrated) {
+      updateLikelyBenefitNotice(nextProfile, canReportNewFeedMatches);
+    }
     matchDisplayTarget = MATCH_PAGE_SIZE;
     cacheHydrated = true;
     loadingBenefits = false;
     lastHydratedRequestKey = requestKey;
+    void hydrateSemanticBenefitScores(nextProfile, sequence);
   }
 
   async function loadMoreBenefitMatches() {
@@ -210,16 +250,19 @@
 
     matchDisplayTarget = nextTarget;
     loadingBenefits = false;
+    void hydrateSemanticBenefitScores(profile, sequence);
   }
 
   async function loadBenefitMatchesUntil(
     snapshot: BenefitsPageData,
     currentProfile: CompanyProfile,
     targetMatches: number,
-    sequence: number
+    sequence: number,
+    forceRefresh = false
   ) {
-    let records = snapshot.benefits.records;
+    let records = forceRefresh ? [] : snapshot.benefits.records;
     let previousRecordCount = -1;
+    let shouldForceRefresh = forceRefresh;
 
     while (
       getAutoMatchCount(records, currentProfile) < targetMatches &&
@@ -231,6 +274,7 @@
         Math.max(records.length + RECORD_SCAN_BATCH_SIZE, RECORD_SCAN_BATCH_SIZE)
       );
       const benefits = await hydrateProgressiveCachedBenefitsResult(snapshot.benefits.endpoint, requestedCount, {
+        forceRefresh: shouldForceRefresh,
         onProgress: (progress) => {
           if (sequence === hydrationSequence) {
             loadProgress = {
@@ -240,6 +284,7 @@
           }
         }
       });
+      shouldForceRefresh = false;
 
       if (sequence !== hydrationSequence) {
         return;
@@ -256,7 +301,9 @@
     }
 
     if (records.length === 0) {
-      const benefits = await hydrateProgressiveCachedBenefitsResult(snapshot.benefits.endpoint, RECORD_SCAN_BATCH_SIZE);
+      const benefits = await hydrateProgressiveCachedBenefitsResult(snapshot.benefits.endpoint, RECORD_SCAN_BATCH_SIZE, {
+        forceRefresh: shouldForceRefresh
+      });
 
       if (sequence === hydrationSequence) {
         applyBenefitsResult(snapshot, benefits);
@@ -264,11 +311,11 @@
     }
   }
 
-  function withLoadingTimeout(task: Promise<void>): Promise<void> {
+  function withLoadingTimeout(task: Promise<void>): Promise<boolean> {
     return Promise.race([
-      task,
-      new Promise<void>((resolve) => {
-        window.setTimeout(resolve, MATCH_LOAD_TIMEOUT_MS);
+      task.then(() => true),
+      new Promise<boolean>((resolve) => {
+        window.setTimeout(() => resolve(false), MATCH_LOAD_TIMEOUT_MS);
       })
     ]);
   }
@@ -283,6 +330,28 @@
     };
   }
 
+  async function hydrateSemanticBenefitScores(currentProfile: CompanyProfile, sequence: number) {
+    const ruleMatches = data.benefits.records
+      .filter(isCurrentlyAvailableRecord)
+      .map((record) => scoreBenefitRecord(record, currentProfile));
+    const candidates = hasProfileSignals(currentProfile)
+      ? ruleMatches.filter((match) => match.matchScore >= REVIEW_MATCH_THRESHOLD)
+      : ruleMatches;
+    const scores = await fetchSemanticScoresForMatches(
+      getBackendApiUrl(data.benefits.endpoint),
+      currentProfile,
+      candidates,
+      'business-benefits'
+    );
+
+    if (sequence === hydrationSequence) {
+      semanticScores = {
+        ...semanticScores,
+        ...scores
+      };
+    }
+  }
+
   function getAutoMatchCount(records: GenericRecord[], currentProfile: CompanyProfile): number {
     const currentRecords = records.filter(isCurrentlyAvailableRecord);
     const scored = currentRecords.map((record) => scoreBenefitRecord(record, currentProfile));
@@ -292,6 +361,23 @@
     }
 
     return scored.length;
+  }
+
+  function updateLikelyBenefitNotice(currentProfile: CompanyProfile, canReportNewFeedMatches: boolean) {
+    const currentLikelyRefs = data.benefits.records
+      .filter(isCurrentlyAvailableRecord)
+      .map((record) => scoreBenefitRecord(record, currentProfile))
+      .filter((match) => match.matchScore >= LIKELY_MATCH_THRESHOLD)
+      .map((match) => getBenefitRecordRef(match.record))
+      .filter((value): value is string => value !== null);
+    const previousLikelyRefs = readStoredStringList(LIKELY_BENEFIT_REFS_STORAGE_KEY);
+    const previousSet = new Set(previousLikelyRefs);
+
+    newLikelyBenefitCount =
+      canReportNewFeedMatches && previousLikelyRefs.length > 0
+        ? currentLikelyRefs.filter((ref) => !previousSet.has(ref)).length
+        : 0;
+    writeStoredStringList(LIKELY_BENEFIT_REFS_STORAGE_KEY, currentLikelyRefs);
   }
 
   function valueIsPresent(value: unknown): boolean {
@@ -356,6 +442,25 @@
   function getRecordKey(match: ScoredRecord<GenericRecord>, index: number): string {
     const keyField = findField(match.record, idFields);
     return keyField ? `${keyField.key}-${valueToString(keyField.value)}-${index}` : `record-${index}`;
+  }
+
+  function getBenefitRecordRef(record: GenericRecord): string | null {
+    const keyField = findField(record, idFields);
+    if (keyField) {
+      return `${keyField.key}:${valueToString(keyField.value)}`;
+    }
+
+    const title = getRecordFieldValue(record, titleFields);
+    const sponsor = getRecordFieldValue(record, subtitleFields);
+    return title ? `title:${title}|${sponsor ?? ''}` : null;
+  }
+
+  function getBackendApiUrl(endpoint: string): string {
+    try {
+      return new URL(endpoint).origin;
+    } catch {
+      return DEFAULT_BACKEND_API_URL;
+    }
   }
 
   function getRecordFieldValue(record: GenericRecord, candidates: string[]): string | null {
@@ -585,6 +690,16 @@
               <p class="m-0 mt-2 leading-6">
                 Add industry, location, keywords, and funding needs to rank currently available opportunities for your company.
                 <a class="font-semibold text-amber-950 underline" href="/dashboard/persona">Complete Company Profile</a>
+              </p>
+            </section>
+          {/if}
+
+          {#if newLikelyBenefitCount > 0}
+            <section class="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950" role="status">
+              <h3 class="m-0 font-semibold">New likely opportunities found</h3>
+              <p class="m-0 mt-2 leading-6">
+                The Business Benefits Finder feed changed, so FundRadar refreshed the cache and found {newLikelyBenefitCount}
+                newly likely {newLikelyBenefitCount === 1 ? 'match' : 'matches'} for {applicantName}.
               </p>
             </section>
           {/if}

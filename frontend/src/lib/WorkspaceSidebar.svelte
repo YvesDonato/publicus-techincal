@@ -4,10 +4,10 @@
 
   type ActiveSection =
     | 'overview'
-    | 'discovery'
     | 'grants'
     | 'benefits'
     | 'analytics'
+    | 'graph'
     | 'profile'
     | 'matches'
     | 'account'
@@ -36,12 +36,12 @@
 
   const navItems: NavItem[] = [
     { id: 'overview', href: '/dashboard', icon: 'dashboard', label: 'Overview' },
-    { id: 'discovery', href: '/dashboard/discovery', icon: 'explore', label: 'Discovery' },
+    { id: 'matches', href: '/dashboard/persona/matches', icon: 'description', label: 'Opportunity Matches' },
+    { id: 'graph', href: '/dashboard/graph-view', icon: 'hub', label: 'Graph View' },
+    { id: 'profile', href: '/dashboard/persona', icon: 'business_center', label: 'Company Profile' },
     { id: 'grants', href: '/dashboard/grants-contributions', icon: 'request_quote', label: 'Grants and Contributions' },
     { id: 'benefits', href: '/dashboard/business-benefits-finder', icon: 'domain', label: 'Business Benefits Finder' },
     { id: 'analytics', href: '/dashboard/live-view', icon: 'insert_chart', label: 'Analytics' },
-    { id: 'profile', href: '/dashboard/persona', icon: 'business_center', label: 'Company Profile' },
-    { id: 'matches', href: '/dashboard/persona/matches', icon: 'description', label: 'Opportunity Matches' },
     { id: 'account', href: '/dashboard/profile', icon: 'account_circle', label: 'Account Profile' },
     { id: 'settings', href: '/dashboard/settings', icon: 'settings', label: 'Settings' }
   ];
@@ -225,17 +225,6 @@
     </div>
 
     <div class="flex flex-col gap-1 border-t border-slate-200 pt-4">
-      <a
-        class={`flex items-center gap-3 rounded-md px-3 py-2 text-slate-600 no-underline transition hover:bg-slate-200 hover:text-slate-900 ${collapsed ? 'justify-center px-2' : ''}`}
-        href="/"
-        aria-label={collapsed ? 'Support' : undefined}
-        title={collapsed ? 'Support' : undefined}
-      >
-        <span class="material-symbols-outlined">contact_support</span>
-        {#if !collapsed}
-          <span>Support</span>
-        {/if}
-      </a>
       <form method="POST" action="/logout">
         <button
           class={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-slate-600 no-underline transition hover:bg-slate-200 hover:text-slate-900 ${collapsed ? 'justify-center px-2' : ''}`}

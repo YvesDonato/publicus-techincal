@@ -5,7 +5,11 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from publicus_backend.routers import business_benefits, grants, health
+from publicus_backend.core.env import load_root_env
+
+load_root_env()
+
+from publicus_backend.routers import business_benefits, grants, health, opportunities, pipeline, profile_copilot, search
 
 DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 
@@ -28,6 +32,10 @@ def create_app() -> FastAPI:
     app.include_router(grants.router)
     app.include_router(business_benefits.router)
     app.include_router(business_benefits.legacy_router)
+    app.include_router(search.router)
+    app.include_router(profile_copilot.router)
+    app.include_router(opportunities.router)
+    app.include_router(pipeline.router)
     return app
 
 

@@ -12,6 +12,7 @@ from publicus_backend.services.business_benefits import (
     DEFAULT_TOKEN,
     InnovationCanadaError,
     build_client,
+    dataset_update_feed,
     first_programs,
     records_by_category,
 )
@@ -34,6 +35,18 @@ def first_business_benefits_records(
     try:
         with build_client(timeout) as client:
             return first_programs(client, count)
+    except Exception as exc:
+        raise api_error(exc) from exc
+
+
+@router.get("/update-feed")
+@legacy_router.get("/update-feed")
+def business_benefits_update_feed(
+    timeout: float = Query(default=30.0, ge=5.0, le=120.0),
+) -> dict[str, Any]:
+    try:
+        with build_client(timeout) as client:
+            return dataset_update_feed(client)
     except Exception as exc:
         raise api_error(exc) from exc
 

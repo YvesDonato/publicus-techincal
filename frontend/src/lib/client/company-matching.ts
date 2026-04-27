@@ -6,7 +6,6 @@ export type EmployeeRange = '1-10' | '11-50' | '51-200' | '200+';
 export type CompanyProfile = {
   legalEntityName: string;
   doingBusinessAs: string;
-  businessNumber: string;
   incorporationDate: string;
   website: string;
   province: string;
@@ -33,6 +32,8 @@ export type ScoredRecord<TRecord> = {
   record: TRecord;
   amount: number | null;
   matchScore: number;
+  semanticScore?: number | null;
+  ruleScore?: number | null;
   statusLabel: string;
   statusTone: MatchTone;
   reasons: string[];
@@ -65,7 +66,26 @@ const industryOptions = [
 const subSectorOptions = [
   { value: 'ai', label: 'Artificial Intelligence (AI)', terms: ['ai', 'artificial intelligence', 'machine learning'] },
   { value: 'saas', label: 'B2B SaaS', terms: ['saas', 'software', 'cloud'] },
+  { value: 'cybersecurity', label: 'Cybersecurity', terms: ['cybersecurity', 'cyber security', 'security', 'privacy'] },
+  { value: 'data', label: 'Data & Analytics', terms: ['data', 'analytics', 'business intelligence', 'reporting'] },
+  { value: 'fintech', label: 'FinTech', terms: ['fintech', 'financial technology', 'payments', 'banking'] },
+  { value: 'healthtech', label: 'HealthTech / MedTech', terms: ['healthtech', 'medtech', 'medical device', 'digital health'] },
+  { value: 'biotech', label: 'Biotechnology', terms: ['biotechnology', 'biotech', 'life sciences', 'biomanufacturing'] },
+  { value: 'advanced-mfg', label: 'Advanced Manufacturing', terms: ['advanced manufacturing', 'manufacturing', 'automation', 'production'] },
+  { value: 'robotics', label: 'Robotics & Automation', terms: ['robotics', 'robot', 'automation', 'industrial automation'] },
+  { value: 'hardware-iot', label: 'Hardware / IoT', terms: ['hardware', 'iot', 'internet of things', 'connected device'] },
+  { value: 'agtech', label: 'AgTech / FoodTech', terms: ['agtech', 'foodtech', 'agriculture technology', 'food processing'] },
   { value: 'clean', label: 'CleanTech', terms: ['clean technology', 'energy', 'sustainability'] },
+  { value: 'clean-energy', label: 'Clean Energy', terms: ['clean energy', 'renewable energy', 'solar', 'wind'] },
+  { value: 'ev', label: 'Electric Vehicles & Batteries', terms: ['electric vehicle', 'ev', 'battery', 'charging'] },
+  { value: 'circular', label: 'Circular Economy', terms: ['circular economy', 'recycling', 'waste reduction', 'reuse'] },
+  { value: 'construction-tech', label: 'Construction Tech', terms: ['construction technology', 'proptech', 'building technology', 'retrofit'] },
+  { value: 'aerospace', label: 'Aerospace', terms: ['aerospace', 'aviation', 'aircraft', 'space'] },
+  { value: 'ocean', label: 'Ocean / Marine Tech', terms: ['ocean technology', 'marine', 'aquaculture', 'blue economy'] },
+  { value: 'supply-chain', label: 'Supply Chain & Logistics', terms: ['supply chain', 'logistics', 'transportation', 'distribution'] },
+  { value: 'digital-media', label: 'Digital Media & Gaming', terms: ['digital media', 'gaming', 'interactive media', 'content'] },
+  { value: 'edtech', label: 'Education Technology', terms: ['edtech', 'education technology', 'learning', 'training'] },
+  { value: 'social-impact', label: 'Social Impact', terms: ['social impact', 'community', 'inclusive', 'nonprofit'] },
   { value: 'accessibility', label: 'Accessibility Tech', terms: ['accessibility', 'accessible', 'disability'] },
   { value: 'export', label: 'Export Growth', terms: ['export', 'international', 'market'] }
 ];
@@ -77,7 +97,6 @@ export function createEmptyCompanyProfile(): CompanyProfile {
   return {
     legalEntityName: '',
     doingBusinessAs: '',
-    businessNumber: '',
     incorporationDate: '',
     website: '',
     province: '',
@@ -443,7 +462,6 @@ function readCompanyProfileRecord(parsed: GenericRecord): CompanyProfile {
   return {
     legalEntityName: readStringField(parsed, 'legalEntityName', defaults.legalEntityName),
     doingBusinessAs: readStringField(parsed, 'doingBusinessAs', defaults.doingBusinessAs),
-    businessNumber: readStringField(parsed, 'businessNumber', defaults.businessNumber),
     incorporationDate: readStringField(parsed, 'incorporationDate', defaults.incorporationDate),
     website: readStringField(parsed, 'website', defaults.website),
     province: readStringField(parsed, 'province', defaults.province),

@@ -33,14 +33,6 @@
       keywords: ['home', 'overview', 'workspace', 'fundradar']
     },
     {
-      label: 'Discovery',
-      href: '/dashboard/discovery',
-      icon: 'explore',
-      group: 'Funding data',
-      description: 'Search grants and contributions records.',
-      keywords: ['grants', 'grant', 'contributions', 'funding', 'programs', 'discovery']
-    },
-    {
       label: 'Grants and Contributions',
       href: '/dashboard/grants-contributions',
       icon: 'request_quote',
@@ -70,7 +62,7 @@
       icon: 'business_center',
       group: 'Workspace',
       description: 'Edit organization identity, jurisdiction, scale, and funding objectives.',
-      keywords: ['company', 'profile', 'portfolio', 'organization', 'business number', 'settings']
+      keywords: ['company', 'profile', 'portfolio', 'organization', 'settings']
     },
     {
       label: 'Opportunity Matches',
@@ -79,6 +71,14 @@
       group: 'Workspace',
       description: 'Review ranked funding matches and saved opportunities.',
       keywords: ['matches', 'opportunities', 'applications', 'shortlist', 'ranked', 'apply']
+    },
+    {
+      label: 'Graph View',
+      href: '/dashboard/graph-view',
+      icon: 'hub',
+      group: 'Workspace',
+      description: 'Explore company-centered opportunity matches as an interactive graph.',
+      keywords: ['graph', 'network', 'nodes', 'interactive', 'matches', 'opportunities']
     },
     {
       label: 'Account Profile',
@@ -93,8 +93,8 @@
       href: '/dashboard/settings',
       icon: 'settings',
       group: 'Workspace',
-      description: 'Manage account, notifications, defaults, and data controls.',
-      keywords: ['settings', 'notifications', 'account', 'privacy', 'defaults']
+      description: 'Open account, profile, and sign-out controls.',
+      keywords: ['settings', 'account', 'profile', 'sign out', 'logout']
     }
   ];
 
@@ -251,7 +251,7 @@
       {:else}
         <div class="grid gap-1 p-3.5 text-[13px] text-slate-600" role="status">
           <strong class="text-slate-900">No matching pages</strong>
-          <span>Try Overview, Discovery, Grants and Contributions, Business Benefits Finder, Analytics, Company Profile, Opportunity Matches, Account Profile, or Settings.</span>
+          <span>Try Overview, Grants and Contributions, Business Benefits Finder, Analytics, Company Profile, Opportunity Matches, Graph View, Account Profile, or Settings.</span>
         </div>
       {/if}
     </div>

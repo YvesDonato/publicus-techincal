@@ -7,7 +7,6 @@ type EmployeeRange = '1-10' | '11-50' | '51-200' | '200+';
 type CompanyProfilePayload = {
   legalEntityName: string;
   doingBusinessAs: string;
-  businessNumber: string;
   incorporationDate: string;
   website: string;
   province: string;
@@ -37,7 +36,7 @@ export const GET: RequestHandler = async ({ locals }) => {
   const { data, error: profileError } = await locals.supabase
     .from('company_profiles')
     .select(
-      'legal_entity_name, doing_business_as, business_number, incorporation_date, website, province, city, company_type, employee_range, industry, sub_sector, keywords, funding_need, funding_objectives'
+      'legal_entity_name, doing_business_as, incorporation_date, website, province, city, company_type, employee_range, industry, sub_sector, keywords, funding_need, funding_objectives'
     )
     .eq('user_id', user.id)
     .maybeSingle();
@@ -64,7 +63,6 @@ export const PUT: RequestHandler = async ({ locals, request }) => {
       user_id: user.id,
       legal_entity_name: payload.legalEntityName,
       doing_business_as: nullable(payload.doingBusinessAs),
-      business_number: nullable(payload.businessNumber),
       incorporation_date: nullable(payload.incorporationDate),
       website: nullable(payload.website),
       province: nullable(payload.province),
@@ -97,7 +95,6 @@ function rowToPayload(row: Record<string, unknown>): CompanyProfilePayload {
   return normalizePayload({
     legalEntityName: row.legal_entity_name,
     doingBusinessAs: row.doing_business_as,
-    businessNumber: row.business_number,
     incorporationDate: row.incorporation_date,
     website: row.website,
     province: row.province,
@@ -122,7 +119,6 @@ function normalizePayload(value: unknown): CompanyProfilePayload {
   return {
     legalEntityName: readString(record.legalEntityName, 240),
     doingBusinessAs: readString(record.doingBusinessAs, 240),
-    businessNumber: readString(record.businessNumber, 40),
     incorporationDate: readDate(record.incorporationDate),
     website: readUrl(record.website),
     province: provinces.has(province) ? province : '',

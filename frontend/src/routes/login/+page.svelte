@@ -154,11 +154,6 @@
 
     <footer class="mt-auto flex flex-wrap items-center justify-center gap-4 border-t border-[#e0e3e5] pt-12 sm:justify-between">
       <span class="text-sm leading-5 text-[#45464d]">© 2026 FundRadar</span>
-      <div class="flex gap-6">
-        <a class="text-sm leading-5 text-[#45464d] no-underline transition hover:text-[#191c1e]" href="/">Privacy Policy</a>
-        <a class="text-sm leading-5 text-[#45464d] no-underline transition hover:text-[#191c1e]" href="/">Terms of Service</a>
-        <a class="text-sm leading-5 text-[#45464d] no-underline transition hover:text-[#191c1e]" href="/">Contact Support</a>
-      </div>
     </footer>
   </section>
 </div>

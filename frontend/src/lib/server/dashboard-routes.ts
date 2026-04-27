@@ -1,5 +1,6 @@
 const legacyDashboardPaths = new Map<string, string>([
   ['/business-benefits-finder', '/dashboard/business-benefits-finder'],
+  ['/graph-view', '/dashboard/graph-view'],
   ['/grants-contributions', '/dashboard/grants-contributions'],
   ['/live-view', '/dashboard/live-view'],
   ['/persona/matches', '/dashboard/persona/matches'],

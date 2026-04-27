@@ -1,23 +1,45 @@
 # Publicus Technical
 
-Publicus is currently a Nix-backed SvelteKit + FastAPI workspace for exploring Canadian public funding data. The backend wraps Open Canada data sources, and the frontend presents the records in a FundRadar-style funding discovery UI.
+Publicus Technical is the workspace for FundRadar, a Canadian funding discovery product. It combines a SvelteKit frontend, a FastAPI backend, Supabase auth and storage, and public Canadian funding datasets for grants, contributions, and business support programs.
+
+The app is currently optimized for authenticated funding discovery: users build a company profile, browse government funding datasets, compare opportunity matches, and use optional AI-assisted profile and opportunity analysis when the relevant provider keys are configured.
 
 ## Current State
 
-- Nix flake and direnv are set up at the repository root.
-- The frontend is a SvelteKit app in `frontend/`.
-- The backend is a multi-file FastAPI package in `backend/publicus_backend/`.
-- Grants and Contributions data is pulled from Open Canada's CKAN APIs.
-- Business Benefits Finder data is pulled from the latest Open Canada XLSX resource.
-- The frontend has routes for a landing page, dashboard, grant browsing, business benefits, live views, persona pages, matches, and settings.
-- Dashboard data loading supports URL-backed filters such as `source`, `year`, `count`, and `sort`.
+- Frontend: SvelteKit 2 app in `frontend/`, styled with Tailwind CSS 4.
+- Backend: FastAPI package in `backend/publicus_backend/`.
+- Auth and persistence: Supabase auth, profiles, company profiles, ingestion tables, and optional pgvector opportunity embeddings.
+- Dataset sources:
+  - Open Canada - Grants & Contributions.
+  - Innovation Canada - Business Benefits Finder.
+- Dashboard UX:
+  - `/` is the public homepage.
+  - `/dashboard` is the protected overview route.
+  - All dashboard pages share a sidebar, topbar, global search, and responsive workspace shell.
+  - Legacy top-level dashboard URLs redirect into `/dashboard/...`.
+- Data loading:
+  - The frontend prefers backend-ingested Supabase pipeline records.
+  - If pipeline storage is unavailable or empty, it falls back to the live source APIs and browser cache.
+- Security posture:
+  - Dashboard routes require a Supabase session.
+  - Ingestion routes require `PUBLICUS_PIPELINE_ADMIN_TOKEN`.
+  - Service role keys stay server-side.
+  - SvelteKit responses include conservative security headers and FastAPI CORS is allowlist-based.
 
 ## Project Layout
 
 ```text
 .
+├── .env.example
 ├── .envrc
 ├── flake.nix
+├── supabase/
+│   └── migrations/
+│       ├── 20260427000000_create_profiles.sql
+│       ├── 20260427001000_create_company_profiles.sql
+│       ├── 20260427002000_harden_profile_constraints.sql
+│       ├── 20260427003000_add_opportunity_embeddings.sql
+│       └── 20260427004000_create_ingestion_tables.sql
 ├── backend/
 │   ├── main.py
 │   ├── open_canada_grants_scraper.py
@@ -27,24 +49,39 @@ Publicus is currently a Nix-backed SvelteKit + FastAPI workspace for exploring C
 │       ├── routers/
 │       │   ├── business_benefits.py
 │       │   ├── grants.py
-│       │   └── health.py
+│       │   ├── health.py
+│       │   ├── innovation.py
+│       │   ├── opportunities.py
+│       │   ├── pipeline.py
+│       │   ├── profile_copilot.py
+│       │   └── search.py
 │       └── services/
 │           ├── business_benefits.py
-│           └── grants.py
+│           ├── embeddings.py
+│           ├── grants.py
+│           ├── innovation.py
+│           ├── opportunity_analysis.py
+│           ├── pipeline.py
+│           ├── profile_copilot.py
+│           └── semantic_search.py
 └── frontend/
     ├── package.json
     └── src/
-        ├── lib/server/
-        │   ├── dashboard-data.ts
-        │   └── live-view-data.ts
+        ├── hooks.server.ts
+        ├── lib/
+        │   ├── DashboardSearch.svelte
+        │   ├── OpportunityForceGraph.svelte
+        │   ├── WorkspaceSidebar.svelte
+        │   ├── WorkspaceTopbar.svelte
+        │   ├── client/
+        │   └── server/
         └── routes/
             ├── +page.svelte
-            ├── dashboard/
-            ├── grants-contributions/
-            ├── business-benefits-finder/
-            ├── live-view/
-            ├── persona/
-            └── settings/
+            ├── login/
+            ├── signup/
+            ├── logout/
+            ├── auth/callback/
+            └── dashboard/
 ```
 
 ## Development Setup
@@ -57,14 +94,7 @@ direnv allow .
 nix develop
 ```
 
-The flake dev shell provides:
-
-- Node.js 22
-- Python 3.13
-- uv
-- FastAPI, Uvicorn, Pydantic, HTTPX, pytest
-- Chromium on Linux for Business Benefits Finder category scraping
-- direnv, git, nil, and nixfmt
+The flake dev shell provides Node.js, Python, uv, FastAPI, Uvicorn, Pydantic, HTTPX, pytest, Chromium on Linux for rendered source scraping, direnv, git, nil, and nixfmt.
 
 Install frontend dependencies when needed:
 
@@ -84,17 +114,112 @@ Run the frontend:
 npm --prefix frontend run dev -- --host 0.0.0.0
 ```
 
-## Backend
+The frontend defaults to `http://127.0.0.1:8000` for FastAPI calls. Set `BACKEND_API_URL` if the backend runs somewhere else.
+
+## Environment
+
+Copy the root example file and fill in local values:
+
+```bash
+cp .env.example .env
+direnv allow .
+```
+
+The root `.env` is loaded by `.envrc`, so frontend and backend commands run from this repo receive the same variables. SvelteKit and Vite are configured to read the root `.env`.
+
+Required for auth:
+
+```bash
+PUBLIC_SUPABASE_URL=
+PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+```
+
+Common backend and pipeline variables:
+
+```bash
+BACKEND_API_URL=http://127.0.0.1:8000
+PUBLICUS_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+PUBLICUS_PIPELINE_ADMIN_TOKEN=
+```
+
+Optional AI and embedding variables:
+
+```bash
+PUBLICUS_EMBEDDING_PROVIDER=google
+PUBLICUS_EMBEDDING_DIMENSIONS=1536
+PUBLICUS_GOOGLE_EMBEDDING_MODEL=gemini-embedding-001
+PUBLICUS_GOOGLE_EMBEDDING_BATCH_SIZE=100
+PUBLICUS_GOOGLE_EMBEDDING_TASK_TYPE=SEMANTIC_SIMILARITY
+GEMINI_API_KEY=
+PUBLICUS_GEMINI_GENERATION_MODEL=gemini-2.0-flash
+```
+
+`GOOGLE_API_KEY` and `GOOGLE_GENERATIVE_AI_API_KEY` are also accepted by the backend. An OpenAI embedding fallback can be enabled with:
+
+```bash
+PUBLICUS_EMBEDDING_PROVIDER=openai
+OPENAI_API_KEY=
+```
+
+Do not expose `SUPABASE_SERVICE_ROLE_KEY` in browser code. It is only for FastAPI pipeline writes, pipeline reads, semantic search, and pgvector caching.
+
+## Frontend Routes
+
+Public routes:
+
+```text
+/                  FundRadar homepage
+/login             Supabase email/password login
+/signup            Account creation
+/auth/callback     Supabase auth callback
+/logout            Sign out endpoint
+```
+
+Protected dashboard routes:
+
+```text
+/dashboard                                  Overview
+/dashboard/grants-contributions             Open Canada grants and contributions
+/dashboard/business-benefits-finder         Innovation Canada business benefits
+/dashboard/live-view                        Combined live dataset view
+/dashboard/persona                          Company profile matching workflow
+/dashboard/persona/matches                  Matched opportunity results
+/dashboard/graph-view                       Opportunity relationship graph
+/dashboard/profile                          Company profile builder
+/dashboard/settings                         Account and workspace settings
+```
+
+Legacy route redirects:
+
+```text
+/business-benefits-finder -> /dashboard/business-benefits-finder
+/grants-contributions     -> /dashboard/grants-contributions
+/live-view                -> /dashboard/live-view
+/persona                  -> /dashboard/persona
+/persona/matches          -> /dashboard/persona/matches
+/profile                  -> /dashboard/profile
+/settings                 -> /dashboard/settings
+/company                  -> /dashboard/persona
+```
+
+Dashboard protection is enforced in `frontend/src/hooks.server.ts` with `safeGetSession()`. Unauthenticated users are redirected to `/login?next=...`.
+
+## Backend API
 
 The FastAPI app is created in `backend/publicus_backend/app.py`.
 
-Main sections:
+Router summary:
 
-- `routers/grants.py`: Grants and Contributions API routes.
-- `routers/business_benefits.py`: Business Benefits Finder API routes.
-- `routers/innovation.py`: legacy alias for `/api/innovation/*`.
-- `services/grants.py`: Open Canada grants scraper, CKAN helpers, export helpers, and CLI.
-- `services/business_benefits.py`: Open Canada Business Benefits Finder XLSX parser and category scraping logic.
+- `routers/grants.py`: Open Canada Grants & Contributions.
+- `routers/business_benefits.py`: Innovation Canada Business Benefits Finder.
+- `routers/innovation.py`: legacy Innovation Canada route compatibility.
+- `routers/search.py`: semantic scoring and index search.
+- `routers/opportunities.py`: opportunity analysis and fit judging.
+- `routers/profile_copilot.py`: company profile extraction assistance.
+- `routers/pipeline.py`: Supabase-backed source ingestion and pipeline reads.
+- `routers/health.py`: health check.
 
 Useful endpoints:
 
@@ -102,15 +227,29 @@ Useful endpoints:
 GET  /health
 GET  /api/grants
 GET  /api/grants/discover
+GET  /api/grants/resources
+GET  /api/grants/csv-url
 GET  /api/grants/first/{count}
 GET  /api/grants/by-calendar-year/{year}
 GET  /api/grants/by-reference/{ref_number}
-GET  /api/grants/csv-url
 POST /api/grants/export
+GET  /api/grants/export/{task_id}
 GET  /api/business-benefits/first/{count}
+GET  /api/business-benefits/update-feed
 GET  /api/business-benefits/by-category
 GET  /api/business-benefits/by-category/{category}
 GET  /api/innovation/first/{count}
+GET  /api/innovation/update-feed
+GET  /api/innovation/by-category
+GET  /api/innovation/by-category/{category}
+POST /api/search/semantic
+POST /api/search/semantic/index
+POST /api/opportunities/analyze
+POST /api/opportunities/judge-fit
+POST /api/company-profile/copilot/extract
+GET  /api/pipeline/status
+GET  /api/pipeline/records
+POST /api/pipeline/ingest/{source}
 ```
 
 Fast grant query example:
@@ -123,85 +262,141 @@ curl -G 'http://127.0.0.1:8000/api/grants' \
   --data-urlencode 'include_total=false'
 ```
 
-Direct Open Canada grant lookup example:
+Pipeline query example:
 
 ```bash
-curl -G 'https://open.canada.ca/data/api/3/action/datastore_search' \
-  --data-urlencode 'resource_id=1d15a62f-5656-49ad-8c88-f40ce689d831' \
-  --data-urlencode 'limit=1' \
-  --data-urlencode 'filters={"ref_number":"199-2019-2020-Q4- CSGC16725277"}'
+curl 'http://127.0.0.1:8000/api/pipeline/records?source=grants&limit=25'
 ```
 
-## Data Flow
+Pipeline ingest example:
 
-### Grants
+```bash
+curl -X POST \
+  -H "x-publicus-admin-token: $PUBLICUS_PIPELINE_ADMIN_TOKEN" \
+  'http://127.0.0.1:8000/api/pipeline/ingest/grants?max_records=1000'
+```
 
-The grants scraper targets:
+## Data Pipeline Overview
+
+FundRadar has two read paths for funding data:
+
+1. Pipeline-first reads from normalized Supabase `source_records`.
+2. Live fallback reads from the original public source APIs plus browser cache.
+
+This keeps the dashboard usable before the ingestion tables are configured, while giving production deployments a faster and more consistent storage path.
+
+### Sources
+
+Open Canada - Grants & Contributions:
+
+- Search page: `https://search.open.canada.ca/grants/`
+- CKAN package: `432527ab-7aac-45b5-81d6-7597107a7013`
+- Main datastore resource: `1d15a62f-5656-49ad-8c88-f40ce689d831`
+- Content: historical grant and contribution awards, recipients, programs, departments, agreement dates, amounts, and locations.
+
+Innovation Canada - Business Benefits Finder:
+
+- CKAN package: `4e75337e-70d0-4ed7-92d1-3b85192ec6b1`
+- Content: current business support programs, benefit titles, descriptions, departments, links, and related eligibility metadata.
+- The backend downloads the latest XLSX resource and parses it with Python ZIP/XML tools. Category views can use Chromium because the official rendered page exposes category labels that are not present in the XLSX feed.
+
+### Ingestion
+
+The ingestion service is implemented in `backend/publicus_backend/services/pipeline.py`.
+
+The admin ingest endpoint:
 
 ```text
-https://search.open.canada.ca/grants/
+POST /api/pipeline/ingest/grants
+POST /api/pipeline/ingest/business-benefits
 ```
 
-The site itself is rendered as a web search page, but the raw data comes from Open Canada's CKAN API:
+Ingestion flow:
+
+1. Validate `PUBLICUS_PIPELINE_ADMIN_TOKEN`.
+2. Create an `ingestion_runs` row with status `running`.
+3. Fetch source records from the source-specific service.
+4. Normalize each record into shared fields such as `source`, `source_id`, `title`, `sponsor`, `description`, `province`, `city`, `amount`, dates, `status`, `is_active`, and `content_hash`.
+5. Store the untouched source payload in `raw_record` JSONB.
+6. Upsert by `(source, source_id)` into `source_records`.
+7. Mark the run as `succeeded` or `failed` with counts and error details.
+
+Current safety limits:
+
+- Query limit: `5000`
+- Ingest limit: `25000`
+- Default ingest size: `1000`
+
+The pipeline only deactivates records that disappear from a full snapshot. Partial ingests avoid deactivation so test runs do not incorrectly hide live records.
+
+### Storage Schema
+
+Pipeline tables are created by:
 
 ```text
-https://open.canada.ca/data/api/3/action/package_show?id=432527ab-7aac-45b5-81d6-7597107a7013
-https://open.canada.ca/data/api/3/action/datastore_search
+supabase/migrations/20260427004000_create_ingestion_tables.sql
 ```
 
-The backend uses `package_show` to discover the dataset resources and `datastore_search` to fetch JSON records by resource id. The main grants resource id is:
+Core tables:
+
+- `ingestion_runs`: source, status, started/completed timestamps, record counts, metadata, and error message.
+- `source_records`: normalized searchable fields, source metadata, raw JSONB record, content hash, activity state, and fetched timestamp.
+
+The schema includes indexes for source, activity state, titles, sponsors, dates, amount, fetched time, and raw JSONB lookups. Public read policies are enabled for dashboard reads, while writes are expected through the backend service role key.
+
+### Frontend Read Path
+
+Shared dataset loading is implemented in:
 
 ```text
-1d15a62f-5656-49ad-8c88-f40ce689d831
+frontend/src/lib/client/funding-cache.ts
 ```
 
-For frontend filters, `/api/grants` supports:
+Read flow:
 
-- `limit`
-- `offset`
-- `year`
-- `sort=score|amount|newest`
-- `include_total=false` for faster filtered SSR responses
-- `q`
-- repeated `filter=key=value`
+1. Request `/api/pipeline/records?source=...&limit=...`.
+2. If the pipeline returns records, use them.
+3. If the pipeline is unavailable, not migrated, empty, or returns a non-OK response, fall back to:
+   - `/api/grants?...`
+   - `/api/business-benefits/first/{count}`
+4. Cache successful results in browser `localStorage`.
+5. Hydrate cached records immediately on repeat visits and refresh in the background.
 
-### Business Benefits Finder
+This means local development can still work without migrated pipeline tables, while deployed environments can serve normalized records from Supabase.
 
-Business Benefits Finder uses this Open Canada package:
+### Matching and Analysis
 
-```text
-https://open.canada.ca/data/api/3/action/package_show?id=4e75337e-70d0-4ed7-92d1-3b85192ec6b1
+Company profile data is stored in Supabase and used by dashboard matching views.
+
+Current matching layers:
+
+- Browser-side rule scoring ranks records by profile attributes such as region, industry, goals, and company metadata.
+- `/api/search/semantic` can blend rule scores with embedding similarity when embeddings are configured.
+- `/api/search/semantic/index` can search cached pgvector opportunity embeddings.
+- `/api/opportunities/analyze` and `/api/opportunities/judge-fit` use Gemini generation when configured.
+- `/api/company-profile/copilot/extract` can turn profile interview answers into structured company profile fields.
+
+When AI providers are not configured, the core dashboard and source browsing still work; AI-specific endpoints return availability errors.
+
+### Operations
+
+Pipeline status:
+
+```bash
+curl 'http://127.0.0.1:8000/api/pipeline/status'
 ```
 
-The backend picks the latest XLSX resource, downloads it, and parses the spreadsheet with Python stdlib ZIP/XML tools. Category routes use Chromium because the XLSX feed does not include the category labels exposed by the official rendered page.
+Manual ingest:
 
-## Frontend
-
-The root route is a landing page. The active data views live under:
-
-```text
-/dashboard
-/grants-contributions
-/business-benefits-finder
-/live-view
-/persona
-/persona/matches
-/settings
+```bash
+curl -X POST \
+  -H "x-publicus-admin-token: $PUBLICUS_PIPELINE_ADMIN_TOKEN" \
+  'http://127.0.0.1:8000/api/pipeline/ingest/business-benefits?max_records=1000'
 ```
 
-The dashboard server loader reads URL search params and calls the backend accordingly:
+The pipeline does not include a scheduler yet. For production, trigger these ingest endpoints from a deployment cron, scheduled job, or CI workflow with the admin token stored as a secret.
 
-```text
-/dashboard?source=grants&year=2024&count=25&sort=amount
-/dashboard?source=innovation&count=25&sort=newest
-```
-
-The SvelteKit server-side data helpers live in:
-
-- `frontend/src/lib/server/dashboard-data.ts`
-- `frontend/src/lib/server/live-view-data.ts`
-
-Some frontend views render immediately from SSR metadata and then hydrate records through the local backend/cache helpers in the browser.
+If `/api/pipeline/status` returns `503`, check that `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and the Supabase migrations are applied.
 
 ## Scraper CLI
 
@@ -213,24 +408,27 @@ python backend/open_canada_grants_scraper.py dump --max-records 100 --output bac
 python backend/open_canada_grants_scraper.py dump --format csv --max-records 100 --output backend/data/grants.sample.csv
 ```
 
-The full grants CSV is over 2 GB, so prefer the streaming datastore dump commands unless the raw CSV is explicitly needed.
+The full grants CSV is over 2 GB, so prefer streaming datastore dump commands unless the raw CSV is explicitly needed.
 
 ## Verification
 
-Useful checks:
+Recommended checks:
 
 ```bash
 nix develop -c npm --prefix frontend run check
 nix develop -c npm --prefix frontend run build
-nix develop -c python -m compileall backend/publicus_backend
+nix develop -c python -m compileall -q backend/publicus_backend backend/main.py backend/open_canada_grants_scraper.py
+nix develop -c python -m pytest backend/tests
 nix flake check
 ```
 
-The most recent verification pass completed successfully with the commands above.
+For documentation-only changes, a text sanity check is usually enough. For route, API, pipeline, or schema changes, run the relevant frontend, backend, and migration checks above.
 
-## Notes
+## Operational Notes
 
-- This is still an active technical workspace, not a production deployment.
-- There is no database yet; records are fetched from public Open Canada sources.
-- There is no authentication yet.
-- `BACKEND_API_URL` can be set for the SvelteKit server if the FastAPI backend is not running at `http://127.0.0.1:8000`.
+- Keep `SUPABASE_SERVICE_ROLE_KEY` and `PUBLICUS_PIPELINE_ADMIN_TOKEN` out of client-side code and version control.
+- Apply Supabase migrations before relying on pipeline reads.
+- CORS origins are controlled by `PUBLICUS_CORS_ORIGINS`.
+- Dashboard route protection depends on valid Supabase auth configuration.
+- The live source APIs are public and can be slow or temporarily unavailable, so the Supabase pipeline should be used for production-like deployments.
+- This is an active technical workspace, not a finalized production deployment.

@@ -2,6 +2,7 @@
   import WorkspaceSidebar from '$lib/WorkspaceSidebar.svelte';
   import WorkspaceTopbar from '$lib/WorkspaceTopbar.svelte';
   import { browser } from '$app/environment';
+  import { goto } from '$app/navigation';
   import { hydrateCachedGrantsResult } from '$lib/client/funding-cache';
   import { onMount } from 'svelte';
 
@@ -84,7 +85,7 @@
     'col-span-full mt-1 flex items-center justify-between gap-4 border-t border-slate-200 pt-6 max-md:grid max-md:items-stretch';
   const profileActionsRightClass = 'flex flex-wrap justify-end gap-3 max-md:grid max-md:justify-stretch';
   const profileButtonBaseClass =
-    'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-4 py-3 font-extrabold no-underline transition hover:opacity-90 focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#d3e4fe] max-md:w-full';
+    'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-4 py-3 font-extrabold no-underline transition hover:opacity-90 focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#d3e4fe] disabled:cursor-wait disabled:opacity-65 max-md:w-full';
   const profilePrimaryButtonClass = `${profileButtonBaseClass} border-[#006c49] bg-[#006c49] text-white`;
   const profileSecondaryButtonClass = `${profileButtonBaseClass} border-[#c6c6cd] bg-white text-[#191c1e]`;
   const profileGhostButtonClass = `${profileButtonBaseClass} border-transparent bg-transparent text-[#45464d]`;
@@ -104,7 +105,6 @@
   type CompanyPersona = {
     legalEntityName: string;
     doingBusinessAs: string;
-    businessNumber: string;
     incorporationDate: string;
     website: string;
     province: string;
@@ -116,6 +116,12 @@
     keywords: string;
     fundingNeed: string;
     activities: Record<ActivityKey, boolean>;
+  };
+  type ProfileWalkthroughStep = {
+    targetId: string;
+    icon: string;
+    title: string;
+    detail: string;
   };
   type GrantMatch = {
     grant: GrantRecord;
@@ -130,6 +136,16 @@
   type ShortlistedGrant = {
     ref: string;
     match: GrantMatch | null;
+  };
+  type CopilotQuestion = {
+    id: string;
+    question: string;
+    placeholder: string;
+  };
+  type CopilotDraft = {
+    profile: CompanyPersona;
+    confidence: Record<string, number>;
+    notes: string[];
   };
 
   const companyTypes: { value: CompanyType; label: string }[] = [
@@ -169,7 +185,26 @@
   const subSectorOptions = [
     { value: 'ai', label: 'Artificial Intelligence (AI)', terms: ['ai', 'artificial intelligence', 'machine learning'] },
     { value: 'saas', label: 'B2B SaaS', terms: ['saas', 'software', 'cloud'] },
+    { value: 'cybersecurity', label: 'Cybersecurity', terms: ['cybersecurity', 'cyber security', 'security', 'privacy'] },
+    { value: 'data', label: 'Data & Analytics', terms: ['data', 'analytics', 'business intelligence', 'reporting'] },
+    { value: 'fintech', label: 'FinTech', terms: ['fintech', 'financial technology', 'payments', 'banking'] },
+    { value: 'healthtech', label: 'HealthTech / MedTech', terms: ['healthtech', 'medtech', 'medical device', 'digital health'] },
+    { value: 'biotech', label: 'Biotechnology', terms: ['biotechnology', 'biotech', 'life sciences', 'biomanufacturing'] },
+    { value: 'advanced-mfg', label: 'Advanced Manufacturing', terms: ['advanced manufacturing', 'manufacturing', 'automation', 'production'] },
+    { value: 'robotics', label: 'Robotics & Automation', terms: ['robotics', 'robot', 'automation', 'industrial automation'] },
+    { value: 'hardware-iot', label: 'Hardware / IoT', terms: ['hardware', 'iot', 'internet of things', 'connected device'] },
+    { value: 'agtech', label: 'AgTech / FoodTech', terms: ['agtech', 'foodtech', 'agriculture technology', 'food processing'] },
     { value: 'clean', label: 'CleanTech', terms: ['clean technology', 'energy', 'sustainability'] },
+    { value: 'clean-energy', label: 'Clean Energy', terms: ['clean energy', 'renewable energy', 'solar', 'wind'] },
+    { value: 'ev', label: 'Electric Vehicles & Batteries', terms: ['electric vehicle', 'ev', 'battery', 'charging'] },
+    { value: 'circular', label: 'Circular Economy', terms: ['circular economy', 'recycling', 'waste reduction', 'reuse'] },
+    { value: 'construction-tech', label: 'Construction Tech', terms: ['construction technology', 'proptech', 'building technology', 'retrofit'] },
+    { value: 'aerospace', label: 'Aerospace', terms: ['aerospace', 'aviation', 'aircraft', 'space'] },
+    { value: 'ocean', label: 'Ocean / Marine Tech', terms: ['ocean technology', 'marine', 'aquaculture', 'blue economy'] },
+    { value: 'supply-chain', label: 'Supply Chain & Logistics', terms: ['supply chain', 'logistics', 'transportation', 'distribution'] },
+    { value: 'digital-media', label: 'Digital Media & Gaming', terms: ['digital media', 'gaming', 'interactive media', 'content'] },
+    { value: 'edtech', label: 'Education Technology', terms: ['edtech', 'education technology', 'learning', 'training'] },
+    { value: 'social-impact', label: 'Social Impact', terms: ['social impact', 'community', 'inclusive', 'nonprofit'] },
     { value: 'accessibility', label: 'Accessibility Tech', terms: ['accessibility', 'accessible', 'disability'] },
     { value: 'export', label: 'Export Growth', terms: ['export', 'international', 'market'] }
   ];
@@ -203,8 +238,82 @@
   const LIKELY_MATCH_THRESHOLD = 75;
   const PROFILE_STORAGE_KEY = 'publicus.companyProfile.v1';
   const SHORTLIST_STORAGE_KEY = 'publicus.shortlistedGrantRefs';
+  const profileBuilderWalkthroughSteps: ProfileWalkthroughStep[] = [
+    {
+      targetId: 'company-heading',
+      icon: 'badge',
+      title: 'Core identity',
+      detail: 'Enter the legal name, operating name, website, applicant type, and incorporation date.'
+    },
+    {
+      targetId: 'jurisdiction-heading',
+      icon: 'location_on',
+      title: 'Jurisdiction',
+      detail: 'Add the primary province and city so regional funding programs can be matched correctly.'
+    },
+    {
+      targetId: 'scale-heading',
+      icon: 'groups',
+      title: 'Organization scale',
+      detail: 'Choose the employee range that best represents the company today.'
+    },
+    {
+      targetId: 'sector-heading',
+      icon: 'category',
+      title: 'Sector and objectives',
+      detail: 'Select the industry, sub-sector, keywords, funding activities, and target funding amount.'
+    },
+    {
+      targetId: 'profile-actions',
+      icon: 'task_alt',
+      title: 'Save and continue',
+      detail: 'Save the profile to generate ranked opportunity matches from grants and Business Benefits Finder data.'
+    }
+  ];
+  const copilotQuestions: CopilotQuestion[] = [
+    {
+      id: 'business',
+      question: 'What does your company do, and who do you serve?',
+      placeholder: 'We build accessibility software for public-sector procurement teams.'
+    },
+    {
+      id: 'location',
+      question: 'Where is the company primarily based?',
+      placeholder: 'Ottawa, Ontario.'
+    },
+    {
+      id: 'organization',
+      question: 'What type of organization is it?',
+      placeholder: 'For-profit startup, nonprofit, university lab, municipality, etc.'
+    },
+    {
+      id: 'scale',
+      question: 'How many employees do you have?',
+      placeholder: 'About 18 full-time employees.'
+    },
+    {
+      id: 'funding_goal',
+      question: 'What are you trying to fund?',
+      placeholder: 'R&D, hiring engineers, market expansion, equipment, facilities, export growth.'
+    },
+    {
+      id: 'funding_amount',
+      question: 'How much funding are you looking for?',
+      placeholder: '$250,000.'
+    },
+    {
+      id: 'keywords',
+      question: 'Any important keywords, sectors, technologies, or markets?',
+      placeholder: 'AI, accessibility, public sector, procurement, Ontario.'
+    }
+  ];
 
   let persona = $state(createDefaultPersona());
+  let copilotAnswers = $state<Record<string, string>>(createEmptyCopilotAnswers());
+  let copilotDraft = $state<CopilotDraft | null>(null);
+  let copilotGenerating = $state(false);
+  let copilotError = $state('');
+  let copilotApplied = $state(false);
   let selectedYear = $state<string | null>(null);
   let selectedCount = $state<string | null>(null);
   let selectedSort = $state<SortMode | null>(null);
@@ -213,7 +322,13 @@
   let shortlistHydrated = $state(false);
   let profileHydrated = $state(false);
   let profileSaved = $state(false);
+  let profileSaving = $state(false);
+  let profileSaveError = $state('');
   let grantsHydrated = $state(false);
+  let profileBuilderOnboardingChecked = $state(false);
+  let showProfileBuilderWalkthrough = $state(false);
+  let profileBuilderWalkthroughRequired = $state(false);
+  let profileBuilderWalkthroughStep = $state(0);
 
   const activeYear = $derived(selectedYear ?? data.filters.year?.toString() ?? '');
   const activeCount = $derived(selectedCount ?? data.filters.count.toString());
@@ -244,6 +359,14 @@
   const remainingOpportunities = $derived(visibleGrantMatches.slice(1));
   const totalMatchedCapital = $derived(getTotalMatchedCapital(visibleGrantMatches));
   const applicantName = $derived(persona.doingBusinessAs || persona.legalEntityName || 'your company');
+  const currentProfileWalkthroughStep = $derived(
+    profileBuilderWalkthroughSteps[profileBuilderWalkthroughStep] ?? profileBuilderWalkthroughSteps[0]
+  );
+  const copilotAnsweredCount = $derived(copilotQuestions.filter((question) => copilotAnswers[question.id]?.trim()).length);
+  const copilotDraftChangedFields = $derived(copilotDraft ? getChangedProfileFields(persona, copilotDraft.profile) : []);
+  const profileWalkthroughProgressLabel = $derived(
+    `Step ${profileBuilderWalkthroughStep + 1} of ${profileBuilderWalkthroughSteps.length}`
+  );
 
   function createInitialData(): PersonaData {
     const filters = readClientFilters();
@@ -357,12 +480,13 @@
     void hydrateProfile();
     savedGrantRefs = readSavedGrantRefs();
     shortlistHydrated = true;
+    hydrateProfileBuilderWalkthrough();
 
     void hydratePersonaGrants();
   });
 
   async function hydrateProfile() {
-    persona = (await readServerPersona()) ?? readStoredPersona() ?? createDefaultPersona();
+    persona = readStoredPersona() ?? (await readServerPersona()) ?? createDefaultPersona();
     profileHydrated = true;
   }
 
@@ -391,6 +515,7 @@
     }
 
     profileSaved = false;
+    profileSaveError = '';
   });
 
   $effect(() => {
@@ -405,7 +530,6 @@
     return {
       legalEntityName: 'AccessBuild AI Inc.',
       doingBusinessAs: 'AccessBuild AI',
-      businessNumber: '123456789 RT0001',
       incorporationDate: '2021-05-14',
       website: 'https://example.com',
       province: 'ON',
@@ -431,7 +555,6 @@
     return {
       legalEntityName: '',
       doingBusinessAs: '',
-      businessNumber: '',
       incorporationDate: '',
       website: '',
       province: '',
@@ -456,12 +579,194 @@
   function resetPersona() {
     persona = createDefaultPersona();
     profileSaved = false;
+    profileSaveError = '';
   }
 
   function clearPersona() {
     persona = createEmptyPersona();
     likelyOnly = false;
     profileSaved = false;
+    profileSaveError = '';
+  }
+
+  function createEmptyCopilotAnswers(): Record<string, string> {
+    return Object.fromEntries(copilotQuestions.map((question) => [question.id, '']));
+  }
+
+  function clearCopilotAnswers() {
+    copilotAnswers = createEmptyCopilotAnswers();
+    copilotDraft = null;
+    copilotError = '';
+    copilotApplied = false;
+  }
+
+  async function generateCopilotDraft() {
+    if (!browser || copilotGenerating) {
+      return;
+    }
+
+    const answers = copilotQuestions
+      .map((question) => ({
+        question: question.question,
+        answer: copilotAnswers[question.id]?.trim() ?? ''
+      }))
+      .filter((answer) => answer.answer.length > 0);
+
+    if (answers.length === 0) {
+      copilotError = 'Answer at least one question before generating a draft.';
+      return;
+    }
+
+    copilotGenerating = true;
+    copilotError = '';
+    copilotApplied = false;
+
+    try {
+      const response = await fetch(`${DEFAULT_BACKEND_API_URL}/api/company-profile/copilot/extract`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          answers,
+          current_profile: persona,
+          timeout: 30
+        })
+      });
+      const payload: unknown = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        copilotError = readApiError(payload) ?? 'Could not generate a company profile draft.';
+        return;
+      }
+
+      if (!isRecord(payload) || !isRecord(payload.profile)) {
+        copilotError = 'Gemini returned an incomplete profile draft.';
+        return;
+      }
+
+      copilotDraft = {
+        profile: readPersonaRecord(payload.profile),
+        confidence: isRecord(payload.confidence) ? readConfidenceMap(payload.confidence) : {},
+        notes: Array.isArray(payload.notes) ? payload.notes.map(String).filter(Boolean).slice(0, 5) : []
+      };
+    } catch {
+      copilotError = 'Could not reach the profile copilot service.';
+    } finally {
+      copilotGenerating = false;
+    }
+  }
+
+  function applyCopilotDraft() {
+    if (!copilotDraft) {
+      return;
+    }
+
+    persona = {
+      ...copilotDraft.profile,
+      activities: { ...copilotDraft.profile.activities }
+    };
+    profileSaved = false;
+    profileSaveError = '';
+    copilotApplied = true;
+  }
+
+  function readApiError(payload: unknown): string | null {
+    if (!isRecord(payload)) {
+      return null;
+    }
+
+    if (typeof payload.detail === 'string') {
+      return payload.detail;
+    }
+
+    if (isRecord(payload.detail) && typeof payload.detail.message === 'string') {
+      return payload.detail.message;
+    }
+
+    return null;
+  }
+
+  function readConfidenceMap(record: Record<string, unknown>): Record<string, number> {
+    return Object.fromEntries(
+      Object.entries(record)
+        .map(([key, value]) => [key, typeof value === 'number' ? value : Number(value)])
+        .filter((entry): entry is [string, number] => Number.isFinite(entry[1]))
+    );
+  }
+
+  function getChangedProfileFields(current: CompanyPersona, draft: CompanyPersona): string[] {
+    const fieldKeys: (keyof Omit<CompanyPersona, 'activities'>)[] = [
+      'legalEntityName',
+      'doingBusinessAs',
+      'incorporationDate',
+      'website',
+      'province',
+      'city',
+      'companyType',
+      'employeeRange',
+      'industry',
+      'subSector',
+      'keywords',
+      'fundingNeed'
+    ];
+    const changed = fieldKeys.filter((key) => current[key] !== draft[key]).map(getProfileFieldLabel);
+    const activityChanged = activityOptions.some((activity) => current.activities[activity.value] !== draft.activities[activity.value]);
+
+    return activityChanged ? [...changed, 'Activities'] : changed;
+  }
+
+  function getProfileFieldLabel(key: string): string {
+    const labels: Record<string, string> = {
+      legalEntityName: 'Legal entity',
+      doingBusinessAs: 'Operating name',
+      incorporationDate: 'Incorporation date',
+      website: 'Website',
+      province: 'Province',
+      city: 'City',
+      companyType: 'Applicant type',
+      employeeRange: 'Employee range',
+      industry: 'Industry',
+      subSector: 'Sub-sector',
+      keywords: 'Keywords',
+      fundingNeed: 'Funding need'
+    };
+
+    return labels[key] ?? key;
+  }
+
+  function formatCopilotProfileValue(profile: CompanyPersona, field: string): string {
+    if (field === 'location') {
+      return [profile.city, profile.province].filter(Boolean).join(', ') || 'Not set';
+    }
+
+    if (field === 'companyType') {
+      return companyTypes.find((type) => type.value === profile.companyType)?.label ?? profile.companyType;
+    }
+
+    if (field === 'employeeRange') {
+      return employeeOptions.find((option) => option.value === profile.employeeRange)?.label ?? profile.employeeRange;
+    }
+
+    if (field === 'industry') {
+      return industryOptions.find((option) => option.value === profile.industry)?.label ?? 'Not set';
+    }
+
+    if (field === 'subSector') {
+      return subSectorOptions.find((option) => option.value === profile.subSector)?.label ?? 'Not set';
+    }
+
+    if (field === 'fundingNeed') {
+      return profile.fundingNeed ? moneyFormatter.format(Number(profile.fundingNeed)) : 'Not set';
+    }
+
+    if (field === 'activities') {
+      const labels = activityOptions.filter((activity) => profile.activities[activity.value]).map((activity) => activity.label);
+      return labels.length > 0 ? labels.join(', ') : 'Not set';
+    }
+
+    const value = profile[field as keyof CompanyPersona];
+    return typeof value === 'string' && value.trim() ? value : 'Not set';
   }
 
   function parseMoney(value: string | null | undefined): number | null {
@@ -540,7 +845,6 @@
   function calculatePersonaCompleteness(profile: CompanyPersona, activities: ActivityKey[]): number {
     const fields = [
       profile.legalEntityName,
-      profile.businessNumber,
       profile.incorporationDate,
       profile.website,
       profile.province,
@@ -737,7 +1041,6 @@
       return {
         legalEntityName: readStringField(parsed, 'legalEntityName', defaults.legalEntityName),
         doingBusinessAs: readStringField(parsed, 'doingBusinessAs', defaults.doingBusinessAs),
-        businessNumber: readStringField(parsed, 'businessNumber', defaults.businessNumber),
         incorporationDate: readStringField(parsed, 'incorporationDate', defaults.incorporationDate),
         website: readStringField(parsed, 'website', defaults.website),
         province: readStringField(parsed, 'province', defaults.province),
@@ -802,7 +1105,20 @@
     }
   }
 
-  async function saveServerPersona(profile: CompanyPersona) {
+  function saveStoredPersona(profile: CompanyPersona): boolean {
+    if (!browser) {
+      return false;
+    }
+
+    try {
+      localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function saveServerPersona(profile: CompanyPersona): Promise<boolean> {
     const response = await fetch('/dashboard/persona/profile', {
       method: 'PUT',
       headers: {
@@ -811,8 +1127,8 @@
       body: JSON.stringify(profile)
     });
 
-    if (!response.ok) {
-      throw new Error('Could not save company profile.');
+    if (!response.ok || response.redirected) {
+      return false;
     }
 
     try {
@@ -820,14 +1136,102 @@
     } catch {
       // localStorage can be unavailable in private windows or locked-down browsers.
     }
+
+    return true;
   }
 
   async function saveAndContinue() {
-    if (browser) {
-      await saveServerPersona(persona);
-      profileSaved = true;
-      window.location.href = '/dashboard/persona/matches';
+    if (!browser || profileSaving) {
+      return;
     }
+
+    if (profileBuilderWalkthroughRequired) {
+      showProfileBuilderWalkthrough = true;
+      return;
+    }
+
+    profileSaving = true;
+    profileSaved = false;
+    profileSaveError = '';
+
+    const savedLocally = saveStoredPersona(persona);
+    let savedRemotely = false;
+
+    try {
+      savedRemotely = await saveServerPersona(persona);
+    } catch {
+      savedRemotely = false;
+    }
+
+    if (!savedLocally && !savedRemotely) {
+      profileSaveError = 'Could not save this profile. Check browser storage and try again.';
+      profileSaving = false;
+      return;
+    }
+
+    profileSaved = true;
+
+    try {
+      await goto('/dashboard/persona/matches');
+    } finally {
+      profileSaving = false;
+    }
+  }
+
+  function hydrateProfileBuilderWalkthrough() {
+    if (!browser || profileBuilderOnboardingChecked) {
+      return;
+    }
+
+    profileBuilderOnboardingChecked = true;
+    const params = new URLSearchParams(window.location.search);
+    const requested = params.get('onboarding') === '1' || params.get('onboarding') === 'company-profile';
+
+    if (!requested) {
+      return;
+    }
+
+    showProfileBuilderWalkthrough = true;
+    profileBuilderWalkthroughRequired = true;
+    profileBuilderWalkthroughStep = 0;
+    setTimeout(() => {
+      focusProfileBuilderWalkthroughStep();
+    }, 0);
+  }
+
+  function finishProfileBuilderWalkthrough() {
+    showProfileBuilderWalkthrough = false;
+    profileBuilderWalkthroughRequired = false;
+    removeProfileBuilderOnboardingSearchParam(new URLSearchParams(window.location.search));
+  }
+
+  function advanceProfileBuilderWalkthrough() {
+    profileBuilderWalkthroughStep = Math.min(
+      profileBuilderWalkthroughSteps.length - 1,
+      profileBuilderWalkthroughStep + 1
+    );
+    setTimeout(() => {
+      focusProfileBuilderWalkthroughStep();
+    }, 0);
+  }
+
+  function retreatProfileBuilderWalkthrough() {
+    profileBuilderWalkthroughStep = Math.max(0, profileBuilderWalkthroughStep - 1);
+    setTimeout(() => {
+      focusProfileBuilderWalkthroughStep();
+    }, 0);
+  }
+
+  function focusProfileBuilderWalkthroughStep() {
+    const target = document.getElementById(currentProfileWalkthroughStep.targetId);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function removeProfileBuilderOnboardingSearchParam(params: URLSearchParams) {
+    params.delete('onboarding');
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
+    window.history.replaceState(window.history.state, '', nextUrl);
   }
 
   function readSavedGrantRefs(): string[] {
@@ -1045,6 +1449,137 @@
         </div>
       </section>
 
+      <section class={`${profileCardClass} mb-6 p-8 max-md:p-5`} aria-labelledby="profile-copilot-heading">
+        <div class="mb-6 flex items-start justify-between gap-4 max-lg:grid">
+          <div>
+            <p class="m-0 mb-2 text-xs font-black tracking-normal text-emerald-700 uppercase">Gemini copilot</p>
+            <h3 id="profile-copilot-heading" class="m-0 text-2xl leading-snug text-[#191c1e]">Company Profile Copilot</h3>
+            <p class="mt-1 max-w-[72ch] text-sm leading-6 text-[#45464d]">
+              Answer a few questions in plain language, then review a structured profile draft before applying it.
+            </p>
+          </div>
+
+          <div class="rounded-lg bg-[#f2f4f6] px-4 py-3 text-right max-lg:text-left">
+            <p class="m-0 text-[11px] font-black text-[#45464d] uppercase">Answered</p>
+            <p class="m-0 mt-1 text-xl font-black text-[#006c49]">{copilotAnsweredCount}/{copilotQuestions.length}</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 max-lg:grid-cols-1">
+          {#each copilotQuestions as question (question.id)}
+            <label class={profileFieldClass}>
+              <span>{question.question}</span>
+              <textarea
+                class={`${profileTextareaClass} min-h-20`}
+                bind:value={copilotAnswers[question.id]}
+                placeholder={question.placeholder}
+                rows="2"
+              ></textarea>
+            </label>
+          {/each}
+        </div>
+
+        <div class="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-5">
+          <div class="min-h-5 text-sm font-extrabold" aria-live="polite">
+            {#if copilotError}
+              <span class="text-red-700">{copilotError}</span>
+            {:else if copilotApplied}
+              <span class="text-emerald-700">Draft applied to the form.</span>
+            {:else if copilotDraft}
+              <span class="text-emerald-700">Draft ready for review.</span>
+            {/if}
+          </div>
+
+          <div class="flex flex-wrap justify-end gap-3 max-md:grid max-md:w-full">
+            <button class={profileGhostButtonClass} type="button" onclick={clearCopilotAnswers}>Clear answers</button>
+            <button class={profilePrimaryButtonClass} disabled={copilotGenerating || copilotAnsweredCount === 0} type="button" onclick={generateCopilotDraft}>
+              {copilotGenerating ? 'Generating...' : 'Generate profile draft'}
+              <span class="material-symbols-outlined" aria-hidden="true">auto_awesome</span>
+            </button>
+          </div>
+        </div>
+
+        {#if copilotDraft}
+          <div class="mt-6 grid grid-cols-[minmax(0,1fr)_260px] gap-5 max-lg:grid-cols-1">
+            <div class="rounded-lg border border-slate-200 bg-[#f8fafc] p-4">
+              <div class="mb-4 flex items-start justify-between gap-3 max-md:grid">
+                <div>
+                  <p class="m-0 text-xs font-black tracking-normal text-emerald-700 uppercase">Draft profile</p>
+                  <h4 class="m-0 mt-1 text-xl leading-snug text-[#191c1e]">
+                    {copilotDraft.profile.doingBusinessAs || copilotDraft.profile.legalEntityName || 'Company profile draft'}
+                  </h4>
+                </div>
+                <button class={profileSecondaryButtonClass} type="button" onclick={applyCopilotDraft}>Apply to form</button>
+              </div>
+
+              <dl class="m-0 grid grid-cols-2 gap-3 text-sm max-md:grid-cols-1">
+                <div>
+                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Legal entity</dt>
+                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'legalEntityName')}</dd>
+                </div>
+                <div>
+                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Location</dt>
+                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'location')}</dd>
+                </div>
+                <div>
+                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Applicant type</dt>
+                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'companyType')}</dd>
+                </div>
+                <div>
+                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Employees</dt>
+                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'employeeRange')}</dd>
+                </div>
+                <div>
+                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Industry</dt>
+                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'industry')}</dd>
+                </div>
+                <div>
+                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Sub-sector</dt>
+                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'subSector')}</dd>
+                </div>
+                <div>
+                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Funding need</dt>
+                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'fundingNeed')}</dd>
+                </div>
+                <div>
+                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Activities</dt>
+                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'activities')}</dd>
+                </div>
+                <div class="col-span-2 max-md:col-span-1">
+                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Keywords</dt>
+                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'keywords')}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <aside class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="m-0 text-xs font-black tracking-normal text-emerald-700 uppercase">Review</p>
+              <p class="mt-2 text-sm leading-6 text-[#45464d]">
+                {copilotDraftChangedFields.length > 0
+                  ? `${copilotDraftChangedFields.length} form fields will change.`
+                  : 'No form field changes detected.'}
+              </p>
+
+              {#if copilotDraftChangedFields.length > 0}
+                <div class="mt-3 flex flex-wrap gap-2">
+                  {#each copilotDraftChangedFields as field (field)}
+                    <span class="rounded-full border border-slate-200 bg-[#f2f4f6] px-2.5 py-1 text-xs font-black text-[#45464d]">{field}</span>
+                  {/each}
+                </div>
+              {/if}
+
+              {#if copilotDraft.notes.length > 0}
+                <ul class="mt-4 grid list-none gap-2 p-0 text-sm leading-6 text-[#45464d]">
+                  {#each copilotDraft.notes as note (note)}
+                    <li class="relative pl-4 before:absolute before:left-0 before:text-emerald-700 before:content-['-']">{note}</li>
+                  {/each}
+                </ul>
+              {/if}
+            </aside>
+          </div>
+        {/if}
+      </section>
+
       <section class={profileBuilderClass} aria-labelledby="company-heading">
         <section class={profileWideCardClass} aria-labelledby="company-heading">
           <div class={profileCardHeaderClass}>
@@ -1078,16 +1613,6 @@
                   <option value={companyType.value}>{companyType.label}</option>
                 {/each}
               </select>
-            </label>
-
-            <label class={profileFieldClass}>
-              <span>Business Number (CRA)</span>
-              <input
-                bind:value={persona.businessNumber}
-                class={`${profileInputClass} font-mono`}
-                name="business-number"
-                placeholder="123456789 RT0001"
-              />
             </label>
 
             <label class={profileFieldClass}>
@@ -1236,20 +1761,25 @@
           </div>
         </section>
 
-        <section class={profileActionsClass} aria-label="Profile actions">
+        <section id="profile-actions" class={profileActionsClass} aria-label="Profile actions">
           <a class={profileSecondaryButtonClass} href="/dashboard">Back</a>
           <div class={profileActionsRightClass}>
             <button class={profileGhostButtonClass} type="button" onclick={clearPersona}>Clear profile</button>
             <button class={profileSecondaryButtonClass} type="button" onclick={resetPersona}>Reset sample</button>
-            <button class={profilePrimaryButtonClass} type="button" onclick={saveAndContinue}>
-              Save and continue
+            <button class={profilePrimaryButtonClass} disabled={profileSaving} type="button" onclick={saveAndContinue}>
+              {profileSaving ? 'Saving...' : 'Save and continue'}
               <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
             </button>
           </div>
         </section>
 
-        <div class="col-span-full min-h-5 text-right text-sm font-extrabold text-emerald-700 max-md:text-left" aria-live="polite">
-          {#if profileSaved}
+        <div
+          class={`col-span-full min-h-5 text-right text-sm font-extrabold max-md:text-left ${profileSaveError ? 'text-red-700' : 'text-emerald-700'}`}
+          aria-live="polite"
+        >
+          {#if profileSaveError}
+            {profileSaveError}
+          {:else if profileSaved}
             Profile saved.
           {/if}
         </div>
@@ -1257,4 +1787,54 @@
     </div>
   </main>
 </div>
+
+  {#if showProfileBuilderWalkthrough}
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-[#0b1c30]/55 p-4 backdrop-blur-sm" role="presentation">
+      <div
+        aria-labelledby="profile-builder-walkthrough-heading"
+        aria-live="polite"
+        aria-modal="true"
+        class="w-full max-w-[520px] rounded-xl border border-[#c6c6cd] bg-white p-5 shadow-[0_20px_70px_rgba(15,23,42,0.24)]"
+        role="dialog"
+      >
+        <div class="mb-4 flex items-start gap-3">
+          <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-700 text-white">
+            <span class="material-symbols-outlined text-[22px]">{currentProfileWalkthroughStep.icon}</span>
+          </span>
+          <div>
+            <p class="m-0 mb-1 text-xs font-black uppercase tracking-normal text-emerald-700">{profileWalkthroughProgressLabel}</p>
+            <h3 id="profile-builder-walkthrough-heading" class="m-0 text-xl leading-tight text-[#191c1e]">
+              {currentProfileWalkthroughStep.title}
+            </h3>
+          </div>
+        </div>
+
+        <p class="m-0 mb-4 text-sm leading-6 text-[#45464d]">{currentProfileWalkthroughStep.detail}</p>
+
+        <p class="m-0 mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+          Finish this walkthrough before saving and reviewing matches.
+        </p>
+
+        <div class="flex flex-wrap justify-end gap-2 border-t border-[#e0e3e5] pt-4">
+          <button
+            class="rounded-lg border border-[#c6c6cd] px-3 py-2 text-sm font-semibold text-[#0b1c30] transition hover:bg-[#eceef0] disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={profileBuilderWalkthroughStep === 0}
+            type="button"
+            onclick={retreatProfileBuilderWalkthrough}
+          >
+            Back
+          </button>
+          {#if profileBuilderWalkthroughStep < profileBuilderWalkthroughSteps.length - 1}
+            <button class="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-800" type="button" onclick={advanceProfileBuilderWalkthrough}>
+              Next
+            </button>
+          {:else}
+            <button class="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-800" type="button" onclick={finishProfileBuilderWalkthrough}>
+              Finish
+            </button>
+          {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>

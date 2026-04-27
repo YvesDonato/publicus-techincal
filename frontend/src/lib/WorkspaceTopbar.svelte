@@ -62,12 +62,6 @@
   </div>
 
   <div class="ml-4 flex items-center gap-2 md:gap-4">
-    <button class="rounded-full p-2 text-emerald-600 transition hover:bg-slate-50" type="button" aria-label="Notifications">
-      <span class="material-symbols-outlined">notifications</span>
-    </button>
-    <button class="rounded-full p-2 text-emerald-600 transition hover:bg-slate-50" type="button" aria-label="Help">
-      <span class="material-symbols-outlined">help_outline</span>
-    </button>
     {#if user}
       <a
         class="ml-1 flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 text-slate-700 no-underline transition hover:bg-slate-50 md:ml-2"

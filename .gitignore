@@ -10,7 +10,9 @@ dist/
 
 .env
 .env.*
-!.env.example
+**/.env
+**/.env.*
+!/.env.example
 
 backend/.venv/
 backend/data/*

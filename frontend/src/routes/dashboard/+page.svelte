@@ -9,6 +9,8 @@
   } from '$lib/client/funding-cache';
   import {
     REVIEW_MATCH_THRESHOLD,
+    companyDisplayName,
+    createEmptyCompanyProfile,
     hasProfileSignals,
     isCurrentlyAvailableRecord,
     loadCompanyProfile,
@@ -58,74 +60,150 @@
     target: number;
     error: string | null;
   };
+  type WalkthroughStep = {
+    icon: string;
+    title: string;
+    detail: string;
+    checklist: string[];
+  };
+
+  const COMPANY_ONBOARDING_PENDING_STORAGE_KEY = 'publicus.companyProfileOnboarding.pending.v1';
+  const companyProfileWalkthroughSteps: WalkthroughStep[] = [
+    {
+      icon: 'badge',
+      title: 'Confirm company identity',
+      detail: 'Start with the legal entity name, operating name, website, applicant type, and incorporation date.',
+      checklist: ['Legal entity and DBA', 'Website', 'Applicant type']
+    },
+    {
+      icon: 'location_on',
+      title: 'Add jurisdiction and scale',
+      detail: 'Set the company province, city, and current employee range so location and size-sensitive programs rank correctly.',
+      checklist: ['Province or territory', 'Head office city', 'Employee range']
+    },
+    {
+      icon: 'category',
+      title: 'Choose sector signals',
+      detail: 'Select the primary industry, sub-sector, keywords, and funding activities that describe what the company is trying to fund.',
+      checklist: ['Industry and sub-sector', 'Funding keywords', 'Capital objectives']
+    },
+    {
+      icon: 'task_alt',
+      title: 'Save and review matches',
+      detail: 'Save the profile to generate ranked grants and Business Benefits Finder matches from the dashboard data sources.',
+      checklist: ['Target funding amount', 'Save profile', 'Review opportunity matches']
+    }
+  ];
 
   let { data }: { data: DashboardPageData } = $props();
   let preloadStarted = $state(false);
+  let onboardingChecked = $state(false);
+  let showCompanyProfileWalkthrough = $state(false);
+  let companyProfileWalkthroughStep = $state(0);
   let grantsPreload = $state<PreloadStatus>(createPreloadStatus());
   let benefitsPreload = $state<PreloadStatus>(createPreloadStatus());
+  let profile = $state<CompanyProfile>(createEmptyCompanyProfile());
+  let profileHydrated = $state(false);
 
   const MATCH_PRELOAD_TARGET = 50;
   const PRELOAD_BATCH_SIZE = 500;
-  const overviewStats = [
+  const profileReady = $derived(profileHydrated && hasProfileSignals(profile));
+  const applicantName = $derived(companyDisplayName(profile));
+  const totalLoadedRecords = $derived(grantsPreload.loaded + benefitsPreload.loaded);
+  const totalProfileMatches = $derived(grantsPreload.matches + benefitsPreload.matches);
+  const scanBasisLabel = $derived(
+    profileReady
+      ? `Profile-driven matching active for ${applicantName}.`
+      : profileHydrated
+        ? 'Broad matching active until the company profile has more matching signals.'
+        : 'Loading company profile before ranking matches.'
+  );
+  let overviewStats = $derived([
     {
-      label: 'Programs indexed',
-      value: '200+',
-      detail: 'Grants, loans, tax credits, and wage subsidies'
+      label: 'Grant matches',
+      value: formatCount(grantsPreload.matches),
+      detail: `${formatCount(grantsPreload.loaded)} Open Canada records loaded · ${statusLabel(grantsPreload)}`
     },
     {
-      label: 'Funding surfaced',
-      value: '$50M+',
-      detail: 'Matched public support tracked in one workspace'
+      label: 'Business Benefits matches',
+      value: formatCount(benefitsPreload.matches),
+      detail: `${formatCount(benefitsPreload.loaded)} available Innovation Canada programs loaded · ${statusLabel(benefitsPreload)}`
     },
     {
-      label: 'Profile stages',
-      value: '3',
-      detail: 'Company profile, ranked matches, application review'
+      label: 'Total matches',
+      value: formatCount(totalProfileMatches),
+      detail: `${formatCount(grantsPreload.matches)} grants · ${formatCount(benefitsPreload.matches)} Business Benefits Finder`
     }
-  ];
-
-  const platformCards = [
+  ]);
+  const sourceSummaries = $derived([
     {
-      icon: 'travel_explore',
-      title: 'Centralized Discovery',
-      copy: 'Browse Canadian government funding programs without moving between agency portals.'
+      icon: 'account_balance',
+      title: 'Grants and Contributions',
+      href: '/dashboard/grants-contributions',
+      loaded: grantsPreload.loaded,
+      matches: grantsPreload.matches,
+      status: statusLabel(grantsPreload),
+      state: grantsPreload.state,
+      detail: 'Open Canada records ranked against historical award signals.'
     },
     {
-      icon: 'rule_settings',
-      title: 'Precision Matching',
-      copy: 'Use company profile signals to identify programs that are realistic for your team to pursue.'
-    },
-    {
-      icon: 'leaderboard',
-      title: 'Ranked Pipeline',
-      copy: 'Compare opportunities by fit, funding type, amount, sector, and application readiness.'
+      icon: 'work',
+      title: 'Business Benefits Finder',
+      href: '/dashboard/business-benefits-finder',
+      loaded: benefitsPreload.loaded,
+      matches: benefitsPreload.matches,
+      status: statusLabel(benefitsPreload),
+      state: benefitsPreload.state,
+      detail: 'Currently available Innovation Canada programs matched to the profile.'
     }
-  ];
-
-  const workflowSteps = [
+  ]);
+  const routeCards = $derived([
     {
-      step: '01',
-      title: 'Build the company profile',
-      detail: 'Capture sector, stage, location, team size, and funding goals before searching.'
+      icon: 'description',
+      title: 'Opportunity Matches',
+      href: '/dashboard/persona/matches',
+      copy: `${formatCount(totalProfileMatches)} combined matches ready for ranked review.`
     },
     {
-      step: '02',
-      title: 'Review eligible programs',
-      detail: 'Move from a broad dataset into ranked grants, credits, subsidies, and support programs.'
+      icon: 'account_balance',
+      title: 'Grants and Contributions',
+      href: '/dashboard/grants-contributions',
+      copy: `${formatCount(grantsPreload.matches)} grant matches from ${formatCount(grantsPreload.loaded)} loaded records.`
     },
     {
-      step: '03',
-      title: 'Shortlist next actions',
-      detail: 'Save promising records and move the strongest opportunities into application prep.'
+      icon: 'work',
+      title: 'Business Benefits Finder',
+      href: '/dashboard/business-benefits-finder',
+      copy: `${formatCount(benefitsPreload.matches)} available benefit matches from Innovation Canada.`
     }
-  ];
-
-  const coverageItems = [
-    { label: 'Grants', status: 'Open intake', tone: 'emerald' },
-    { label: 'Tax credits', status: 'Profile dependent', tone: 'slate' },
-    { label: 'Loans', status: 'Repayable', tone: 'slate' },
-    { label: 'Wage subsidies', status: 'Hiring signals', tone: 'slate' }
-  ];
+  ]);
+  const nextAction = $derived(getNextAction(profileReady, profileHydrated, grantsPreload, benefitsPreload, totalProfileMatches));
+  const nextActionCards = $derived([
+    nextAction,
+    {
+      icon: 'analytics',
+      title: 'Open Analytics',
+      detail: 'Compare loaded grant and benefit matches by source, value, location, and timing.',
+      href: '/dashboard/live-view',
+      label: 'Open analytics'
+    },
+    {
+      icon: 'tune',
+      title: 'Tune Source Filters',
+      detail: 'Review the underlying source pages when you need to broaden or inspect the loaded records.',
+      href: '/dashboard/business-benefits-finder',
+      label: 'Open benefits'
+    }
+  ]);
+  const currentWalkthroughStep = $derived(
+    companyProfileWalkthroughSteps[companyProfileWalkthroughStep] ?? companyProfileWalkthroughSteps[0]
+  );
+  const walkthroughProgressLabel = $derived(
+    `Step ${companyProfileWalkthroughStep + 1} of ${companyProfileWalkthroughSteps.length}`
+  );
+  const walkthroughProgressPercent = $derived(
+    `${Math.round(((companyProfileWalkthroughStep + 1) / companyProfileWalkthroughSteps.length) * 100)}%`
+  );
 
   $effect(() => {
     if (!browser || preloadStarted) {
@@ -136,12 +214,23 @@
     void preloadDashboardFundingData();
   });
 
+  $effect(() => {
+    if (!browser || onboardingChecked) {
+      return;
+    }
+
+    onboardingChecked = true;
+    hydrateCompanyProfileWalkthrough();
+  });
+
   async function preloadDashboardFundingData() {
-    const profile = await loadCompanyProfile();
+    const loadedProfile = await loadCompanyProfile();
+    profile = loadedProfile;
+    profileHydrated = true;
 
     await Promise.all([
-      preloadGrantMatches(profile),
-      preloadBenefitMatches(profile)
+      preloadGrantMatches(loadedProfile),
+      preloadBenefitMatches(loadedProfile)
     ]);
   }
 
@@ -259,7 +348,7 @@
     };
   }
 
-  function preloadLabel(status: PreloadStatus): string {
+  function statusLabel(status: PreloadStatus): string {
     if (status.state === 'ready') {
       return 'Ready';
     }
@@ -275,8 +364,139 @@
     return 'Queued';
   }
 
+  function getStatusToneClass(state: PreloadStatus['state']): string {
+    if (state === 'ready') {
+      return 'bg-emerald-50 text-emerald-700';
+    }
+
+    if (state === 'error') {
+      return 'bg-amber-50 text-amber-800';
+    }
+
+    if (state === 'loading') {
+      return 'bg-blue-50 text-blue-700';
+    }
+
+    return 'bg-slate-100 text-slate-600';
+  }
+
+  function getNextAction(
+    hasProfile: boolean,
+    profileLoaded: boolean,
+    grantsStatus: PreloadStatus,
+    benefitsStatus: PreloadStatus,
+    matchCount: number
+  ) {
+    if (!profileLoaded) {
+      return {
+        icon: 'hourglass_top',
+        title: 'Loading company profile',
+        detail: 'Profile details are being loaded before FundRadar ranks source records.',
+        href: '/dashboard/persona',
+        label: 'Open profile'
+      };
+    }
+
+    if (!hasProfile) {
+      return {
+        icon: 'business',
+        title: 'Complete Company Profile',
+        detail: 'Add industry, location, activities, and funding goals so the match counts become specific.',
+        href: '/dashboard/persona',
+        label: 'Update profile'
+      };
+    }
+
+    if (grantsStatus.state === 'loading' || benefitsStatus.state === 'loading') {
+      return {
+        icon: 'sync',
+        title: 'Review as results load',
+        detail: `${formatCount(grantsStatus.loaded + benefitsStatus.loaded)} records are cached so far. Source pages will keep finding matches.`,
+        href: '/dashboard/persona/matches',
+        label: 'Review matches'
+      };
+    }
+
+    if (matchCount > 0) {
+      return {
+        icon: 'task_alt',
+        title: 'Review Opportunity Matches',
+        detail: `${formatCount(matchCount)} profile matches are ready for shortlist and application review.`,
+        href: '/dashboard/persona/matches',
+        label: 'Open matches'
+      };
+    }
+
+    return {
+      icon: 'travel_explore',
+      title: 'Open funding sources',
+      detail: 'No profile matches are ready yet. Inspect source records or broaden company profile keywords.',
+      href: '/dashboard/grants-contributions',
+      label: 'Open grants'
+    };
+  }
+
   function formatCount(value: number | null | undefined): string {
     return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('en-CA') : '0';
+  }
+
+  function hydrateCompanyProfileWalkthrough() {
+    const params = new URLSearchParams(window.location.search);
+    const requested = params.get('onboarding') === 'company-profile';
+    const pending = readStorageFlag(COMPANY_ONBOARDING_PENDING_STORAGE_KEY);
+
+    if (requested) {
+      writeStorageFlag(COMPANY_ONBOARDING_PENDING_STORAGE_KEY, true);
+      removeOnboardingSearchParam(params);
+    }
+
+    if (requested || pending) {
+      showCompanyProfileWalkthrough = true;
+      companyProfileWalkthroughStep = 0;
+    }
+  }
+
+  function completeCompanyProfileWalkthrough() {
+    showCompanyProfileWalkthrough = false;
+    writeStorageFlag(COMPANY_ONBOARDING_PENDING_STORAGE_KEY, false);
+  }
+
+  function advanceCompanyProfileWalkthrough() {
+    companyProfileWalkthroughStep = Math.min(
+      companyProfileWalkthroughSteps.length - 1,
+      companyProfileWalkthroughStep + 1
+    );
+  }
+
+  function retreatCompanyProfileWalkthrough() {
+    companyProfileWalkthroughStep = Math.max(0, companyProfileWalkthroughStep - 1);
+  }
+
+  function readStorageFlag(key: string): boolean {
+    try {
+      return localStorage.getItem(key) === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  function writeStorageFlag(key: string, value: boolean) {
+    try {
+      if (value) {
+        localStorage.setItem(key, '1');
+      } else {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // localStorage can be unavailable in private windows or locked-down browsers.
+    }
+  }
+
+  function removeOnboardingSearchParam(params: URLSearchParams) {
+    params.delete('onboarding');
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
+    window.history.replaceState(window.history.state, '', nextUrl);
   }
 </script>
 
@@ -306,19 +526,19 @@
           <div>
             <p class="m-0 mb-2 text-xs font-semibold uppercase tracking-normal text-emerald-700">Overview</p>
             <h2 class="m-0 mb-2 font-[Public_Sans] text-4xl font-semibold leading-tight tracking-normal text-[#191c1e]">
-              Overview
+              Funding Overview
             </h2>
             <p class="m-0 max-w-3xl text-base leading-6 text-[#45464d]">
-              FundRadar brings funding discovery, eligibility matching, and application prioritization into a single
-              operating view.
+              Operational snapshot for {applicantName}. Match counts update while grants and Business Benefits Finder
+              records load in this browser.
             </p>
           </div>
           <div class="flex flex-wrap gap-2">
-            <a class="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-800" href="/dashboard/persona">
-              Company Profile
+            <a class="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-800" href="/dashboard/persona/matches">
+              Opportunity Matches
             </a>
-            <a class="rounded-lg border border-[#c6c6cd] px-4 py-2 text-sm font-semibold text-[#0b1c30] transition hover:bg-[#eceef0]" href="/dashboard/discovery">
-              Grants and Contributions
+            <a class="rounded-lg border border-[#c6c6cd] px-4 py-2 text-sm font-semibold text-[#0b1c30] transition hover:bg-[#eceef0]" href="/dashboard/persona">
+              Company Profile
             </a>
           </div>
         </div>
@@ -340,141 +560,98 @@
                 <div>
                   <span class="mb-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-semibold uppercase tracking-normal text-white">
                     <span class="material-symbols-outlined text-[14px]">radar</span>
-                    Overview
+                    Funding summary
                   </span>
                   <h3 id="platform-heading" class="m-0 mb-2 font-[Public_Sans] text-3xl font-semibold leading-tight text-[#dae2fd]">
-                    Replace scattered program research with a managed funding pipeline.
+                    Funding scan for {applicantName}
                   </h3>
                   <p class="m-0 max-w-2xl text-sm leading-6 text-[#dae2fd]/80">
-                    Concise status, direct entry points, and grounded workflow context help teams move from discovery
-                    into application prep.
+                    {scanBasisLabel} Current matches include {formatCount(grantsPreload.matches)} grants and
+                    {formatCount(benefitsPreload.matches)} Business Benefits Finder programs.
                   </p>
                 </div>
-                <a class="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700" href="/dashboard/discovery">
-                  View Grants
+                <a class="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700" href={nextAction.href}>
+                  {nextAction.label}
                 </a>
               </div>
 
               <div class="grid grid-cols-1 gap-px bg-[#c6c6cd] md:grid-cols-3">
-                {#each platformCards as card (card.title)}
-                  <div class="bg-white p-5">
+                {#each routeCards as card (card.title)}
+                  <a class="bg-white p-5 no-underline transition hover:bg-[#f7f9fb]" href={card.href}>
                     <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
                       <span class="material-symbols-outlined">{card.icon}</span>
                     </div>
                     <h4 class="m-0 mb-2 text-lg font-semibold leading-snug text-[#191c1e]">{card.title}</h4>
                     <p class="m-0 text-sm leading-6 text-[#45464d]">{card.copy}</p>
-                  </div>
+                  </a>
                 {/each}
               </div>
             </article>
 
-            <section class="rounded-xl border border-[#c6c6cd] bg-white p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)]" aria-labelledby="workflow-heading">
+            <section class="rounded-xl border border-[#c6c6cd] bg-white p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)]" aria-labelledby="actions-heading">
               <div class="mb-5 flex items-center justify-between border-b border-[#c6c6cd] pb-3">
                 <div>
-                  <h3 id="workflow-heading" class="m-0 text-sm font-semibold text-[#191c1e]">Recommended Workflow</h3>
-                  <p class="m-0 mt-1 text-sm text-[#45464d]">A dashboard-first path from overview to application prep.</p>
+                  <h3 id="actions-heading" class="m-0 text-sm font-semibold text-[#191c1e]">Next Actions</h3>
+                  <p class="m-0 mt-1 text-sm text-[#45464d]">Use the highest-signal route based on current profile and source status.</p>
                 </div>
-                <span class="material-symbols-outlined text-emerald-700">account_tree</span>
+                <span class="material-symbols-outlined text-emerald-700">task_alt</span>
               </div>
 
               <div class="grid gap-4">
-                {#each workflowSteps as item (item.step)}
-                  <article class="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[4rem_1fr_auto] md:items-center">
-                    <span class="font-[Public_Sans] text-2xl font-semibold text-emerald-700">{item.step}</span>
+                {#each nextActionCards as item, index (item.title)}
+                  <a
+                    class={`grid gap-4 rounded-lg border p-4 no-underline transition hover:-translate-y-0.5 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] md:grid-cols-[3rem_1fr_auto] md:items-center ${
+                      index === 0 ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'
+                    }`}
+                    href={item.href}
+                  >
+                    <span class={`flex h-10 w-10 items-center justify-center rounded-lg ${index === 0 ? 'bg-emerald-700 text-white' : 'bg-white text-emerald-700'}`}>
+                      <span class="material-symbols-outlined">{item.icon}</span>
+                    </span>
                     <div>
                       <h4 class="m-0 mb-1 text-base font-semibold text-[#191c1e]">{item.title}</h4>
                       <p class="m-0 text-sm leading-6 text-[#45464d]">{item.detail}</p>
                     </div>
                     <span class="material-symbols-outlined hidden text-slate-400 md:block">chevron_right</span>
-                  </article>
+                  </a>
                 {/each}
               </div>
             </section>
           </section>
 
           <aside class="flex flex-col gap-6 lg:sticky lg:top-4 lg:col-span-4">
-            <section class="rounded-xl border border-[#c6c6cd] bg-white p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)]" aria-labelledby="preload-heading">
-              <div class="mb-4 flex items-center justify-between border-b border-[#c6c6cd] pb-3">
-                <div>
-                  <h3 id="preload-heading" class="m-0 text-sm font-semibold text-[#191c1e]">Auto-loaded Matches</h3>
-                  <p class="m-0 mt-1 text-sm text-[#45464d]">Dashboard cache warming for funding pages.</p>
-                </div>
-                <span class="material-symbols-outlined text-emerald-700">sync</span>
-              </div>
-
-              <div class="grid gap-3">
-                <article class="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div class="mb-2 flex items-start justify-between gap-3">
-                    <div>
-                      <h4 class="m-0 text-sm font-semibold text-[#191c1e]">Grants and Contributions</h4>
-                      <p class="m-0 mt-1 text-xs font-semibold uppercase tracking-normal text-[#45464d]">
-                        {preloadLabel(grantsPreload)}
-                      </p>
-                    </div>
-                    <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                      {formatCount(grantsPreload.matches)} matches
-                    </span>
-                  </div>
-                  <div class="h-2 overflow-hidden rounded-full bg-slate-200">
-                    <div
-                      class="h-full rounded-full bg-emerald-600 transition-all"
-                      style={`width: ${Math.min(100, Math.round((grantsPreload.loaded / Math.max(1, grantsPreload.target)) * 100))}%`}
-                    ></div>
-                  </div>
-                  <p class="m-0 mt-2 text-xs text-[#45464d]">
-                    {formatCount(grantsPreload.loaded)} records cached
-                  </p>
-                </article>
-
-                <article class="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div class="mb-2 flex items-start justify-between gap-3">
-                    <div>
-                      <h4 class="m-0 text-sm font-semibold text-[#191c1e]">Business Benefits Finder</h4>
-                      <p class="m-0 mt-1 text-xs font-semibold uppercase tracking-normal text-[#45464d]">
-                        {preloadLabel(benefitsPreload)}
-                      </p>
-                    </div>
-                    <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                      {formatCount(benefitsPreload.matches)} matches
-                    </span>
-                  </div>
-                  <div class="h-2 overflow-hidden rounded-full bg-slate-200">
-                    <div
-                      class="h-full rounded-full bg-emerald-600 transition-all"
-                      style={`width: ${Math.min(100, Math.round((benefitsPreload.loaded / Math.max(1, benefitsPreload.target)) * 100))}%`}
-                    ></div>
-                  </div>
-                  <p class="m-0 mt-2 text-xs text-[#45464d]">
-                    {formatCount(benefitsPreload.loaded)} records cached
-                  </p>
-                </article>
-              </div>
-
-              {#if grantsPreload.error || benefitsPreload.error}
-                <p class="m-0 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  One source returned a limited preload. The funding pages will retry when opened.
-                </p>
-              {/if}
-            </section>
-
             <section class="rounded-xl border border-[#c6c6cd] bg-white p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)]" aria-labelledby="coverage-heading">
               <div class="mb-4 flex items-center justify-between border-b border-[#c6c6cd] pb-3">
-                <h3 id="coverage-heading" class="m-0 text-sm font-semibold text-[#191c1e]">Funding Coverage</h3>
-                <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-normal text-emerald-700">Live</span>
+                <h3 id="coverage-heading" class="m-0 text-sm font-semibold text-[#191c1e]">Source Health</h3>
+                <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-normal text-emerald-700">Auto-load</span>
               </div>
 
               <div class="grid gap-3">
-                {#each coverageItems as item (item.label)}
-                  <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-                    <div class="flex items-center gap-3">
-                      <span
-                        class={`h-2.5 w-2.5 rounded-full ${item.tone === 'emerald' ? 'bg-emerald-600' : 'bg-slate-400'}`}
-                        aria-hidden="true"
-                      ></span>
-                      <span class="text-sm font-semibold text-[#191c1e]">{item.label}</span>
+                {#each sourceSummaries as item (item.title)}
+                  <a class="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 no-underline transition hover:bg-white" href={item.href}>
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="flex min-w-0 items-start gap-3">
+                        <span class="material-symbols-outlined mt-0.5 text-emerald-700">{item.icon}</span>
+                        <div class="min-w-0">
+                          <span class="block text-sm font-semibold text-[#191c1e]">{item.title}</span>
+                          <span class="block text-xs leading-5 text-[#45464d]">{item.detail}</span>
+                        </div>
+                      </div>
+                      <span class={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-normal ${getStatusToneClass(item.state)}`}>
+                        {item.status}
+                      </span>
                     </div>
-                    <span class="text-xs font-semibold uppercase tracking-normal text-[#45464d]">{item.status}</span>
-                  </div>
+                    <dl class="m-0 grid grid-cols-2 gap-2">
+                      <div class="rounded-lg bg-white px-3 py-2">
+                        <dt class="text-[11px] font-black uppercase tracking-normal text-[#45464d]">Matches</dt>
+                        <dd class="m-0 text-lg font-semibold text-[#006c49]">{formatCount(item.matches)}</dd>
+                      </div>
+                      <div class="rounded-lg bg-white px-3 py-2">
+                        <dt class="text-[11px] font-black uppercase tracking-normal text-[#45464d]">Loaded</dt>
+                        <dd class="m-0 text-lg font-semibold text-[#191c1e]">{formatCount(item.loaded)}</dd>
+                      </div>
+                    </dl>
+                  </a>
                 {/each}
               </div>
             </section>
@@ -482,15 +659,15 @@
             <section class="rounded-xl border border-[#c6c6cd] bg-white p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)]" aria-labelledby="next-heading">
               <div class="mb-4 flex items-center gap-3">
                 <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-[#131b2e] text-[#dae2fd]">
-                  <span class="material-symbols-outlined">task_alt</span>
+                  <span class="material-symbols-outlined">{nextAction.icon}</span>
                 </div>
                 <div>
                   <h3 id="next-heading" class="m-0 text-base font-semibold text-[#191c1e]">Next best action</h3>
-                  <p class="m-0 text-sm text-[#45464d]">Create or update your profile before ranking matches.</p>
+                  <p class="m-0 text-sm text-[#45464d]">{nextAction.detail}</p>
                 </div>
               </div>
-              <a class="mb-3 block rounded-lg bg-emerald-700 px-4 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-emerald-800" href="/dashboard/persona">
-                Continue to Profile
+              <a class="mb-3 block rounded-lg bg-emerald-700 px-4 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-emerald-800" href={nextAction.href}>
+                {nextAction.label}
               </a>
               <a class="block rounded-lg border border-[#c6c6cd] px-4 py-2.5 text-center text-sm font-semibold text-[#0b1c30] transition hover:bg-[#eceef0]" href="/dashboard/live-view">
                 Open Analytics
@@ -501,4 +678,82 @@
       </div>
     </main>
   </div>
+
+  {#if showCompanyProfileWalkthrough}
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-[#0b1c30]/55 p-4 backdrop-blur-sm" role="presentation">
+      <div
+        aria-labelledby="company-profile-walkthrough-heading"
+        aria-modal="true"
+        class="w-full max-w-[560px] rounded-xl border border-[#c6c6cd] bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,0.22)]"
+        role="dialog"
+      >
+        <div class="mb-5 flex items-start gap-3">
+          <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-emerald-700 text-white">
+            <span class="material-symbols-outlined">{currentWalkthroughStep.icon}</span>
+          </span>
+          <div>
+            <p class="m-0 mb-1 text-xs font-black uppercase tracking-normal text-emerald-700">
+              Required company profile setup
+            </p>
+            <h3 id="company-profile-walkthrough-heading" class="m-0 font-[Public_Sans] text-2xl font-semibold leading-tight text-[#191c1e]">
+              {currentWalkthroughStep.title}
+            </h3>
+          </div>
+        </div>
+
+        <div class="mb-5">
+          <div class="mb-2 flex items-center justify-between text-xs font-black uppercase tracking-normal text-[#45464d]">
+            <span>{walkthroughProgressLabel}</span>
+            <span>{walkthroughProgressPercent}</span>
+          </div>
+          <div class="h-2 overflow-hidden rounded-full bg-[#e0e3e5]">
+            <span class="block h-full rounded-full bg-emerald-700 transition-all" style={`width: ${walkthroughProgressPercent}`}></span>
+          </div>
+        </div>
+
+        <p class="m-0 text-base leading-7 text-[#45464d]">{currentWalkthroughStep.detail}</p>
+
+        <ul class="my-5 grid list-none gap-2 p-0">
+          {#each currentWalkthroughStep.checklist as item (item)}
+            <li class="flex items-center gap-2 rounded-lg bg-[#f2f4f6] px-3 py-2 text-sm font-semibold text-[#191c1e]">
+              <span class="material-symbols-outlined text-[18px] text-emerald-700">check_circle</span>
+              <span>{item}</span>
+            </li>
+          {/each}
+        </ul>
+
+        <p class="m-0 mb-5 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+          Complete this walkthrough to continue into your company profile.
+        </p>
+
+        <div class="flex flex-wrap justify-end gap-2 border-t border-[#e0e3e5] pt-5">
+            <button
+              class="rounded-lg border border-[#c6c6cd] px-4 py-2 text-sm font-semibold text-[#0b1c30] transition hover:bg-[#eceef0] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={companyProfileWalkthroughStep === 0}
+              type="button"
+              onclick={retreatCompanyProfileWalkthrough}
+            >
+              Back
+            </button>
+            {#if companyProfileWalkthroughStep < companyProfileWalkthroughSteps.length - 1}
+              <button
+                class="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-800"
+                type="button"
+                onclick={advanceCompanyProfileWalkthrough}
+              >
+                Next
+              </button>
+            {:else}
+              <a
+                class="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white no-underline transition hover:bg-emerald-800"
+                href="/dashboard/persona?onboarding=1"
+                onclick={completeCompanyProfileWalkthrough}
+              >
+                Start Company Profile
+              </a>
+            {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>

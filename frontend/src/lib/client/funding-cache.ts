@@ -39,6 +39,7 @@ export type HydrationProgress = {
 
 export type ProgressiveHydrationOptions = {
   batchSize?: number;
+  forceRefresh?: boolean;
   onProgress?: (progress: HydrationProgress) => void;
 };
 
@@ -55,6 +56,20 @@ type BenefitsApiResponse = {
   count?: number;
   records?: GenericRecord[];
   source?: string;
+};
+
+type PipelineSource = 'grants' | 'business-benefits';
+
+type PipelineRecordsResponse = {
+  requested?: number;
+  count?: number;
+  total?: number | null;
+  records?: GenericRecord[];
+  source?: PipelineSource | null;
+  pipeline?: {
+    available?: boolean;
+    storage?: string;
+  };
 };
 
 type CacheEnvelope<TResult> = {
@@ -150,6 +165,69 @@ function updateBenefitsEndpoint(endpoint: string, count: number): string {
   }
 }
 
+function buildPipelineEndpoint(endpoint: string, source: PipelineSource, requested: number, offset = 0): string | null {
+  try {
+    const url = new URL(endpoint);
+    const params = new URLSearchParams({
+      source,
+      limit: String(clampCount(requested)),
+      offset: String(Math.max(0, Math.floor(offset)))
+    });
+
+    if (source === 'business-benefits') {
+      params.set('active', 'true');
+    }
+
+    return `${url.origin}/api/pipeline/records?${params.toString()}`;
+  } catch {
+    return null;
+  }
+}
+
+function readEndpointInteger(endpoint: string, key: string, fallback: number): number {
+  try {
+    const value = new URL(endpoint).searchParams.get(key);
+    const parsed = value ? Number(value) : NaN;
+    return Number.isInteger(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function fetchPipelineRecords(
+  endpoint: string,
+  source: PipelineSource,
+  requested: number,
+  offset = 0
+): Promise<PipelineRecordsResponse | null> {
+  const pipelineEndpoint = buildPipelineEndpoint(endpoint, source, requested, offset);
+  if (!pipelineEndpoint) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(pipelineEndpoint);
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as PipelineRecordsResponse;
+    const records = Array.isArray(payload.records) ? payload.records : [];
+    if (records.length === 0) {
+      return null;
+    }
+
+    return {
+      ...payload,
+      requested,
+      count: records.length,
+      records
+    };
+  } catch {
+    return null;
+  }
+}
+
 function sliceGrantsResult(result: CachedGrantsResult, requested: number, endpoint: string): CachedGrantsResult {
   const records = result.records.slice(0, requested);
   return {
@@ -195,6 +273,22 @@ function compactGrantRecord(record: GenericRecord): GenericRecord {
 
 async function fetchGrantsResult(endpoint: string, requested: number): Promise<CachedGrantsResult> {
   try {
+    const pipelinePayload = await fetchPipelineRecords(endpoint, 'grants', requested);
+    if (pipelinePayload) {
+      const records = pipelinePayload.records?.map(compactGrantRecord) ?? [];
+      const result = {
+        requested,
+        count: records.length,
+        records,
+        total: pipelinePayload.total ?? pipelinePayload.count ?? records.length,
+        endpoint,
+        error: null
+      };
+
+      writeCache(GRANTS_CACHE_KEY, result);
+      return sliceGrantsResult(result, requested, endpoint);
+    }
+
     const response = await fetch(endpoint);
 
     if (!response.ok) {
@@ -235,6 +329,22 @@ async function fetchGrantsResult(endpoint: string, requested: number): Promise<C
 
 async function fetchBenefitsResult(endpoint: string, requested: number): Promise<CachedBenefitsResult> {
   try {
+    const pipelinePayload = await fetchPipelineRecords(endpoint, 'business-benefits', requested);
+    if (pipelinePayload) {
+      const records = pipelinePayload.records ?? [];
+      const result = {
+        requested,
+        count: records.length,
+        records,
+        source: 'supabase-pipeline',
+        endpoint,
+        error: null
+      };
+
+      writeCache(BENEFITS_CACHE_KEY, result);
+      return sliceBenefitsResult(result, requested, endpoint);
+    }
+
     const response = await fetch(endpoint);
 
     if (!response.ok) {
@@ -275,6 +385,20 @@ async function fetchBenefitsResult(endpoint: string, requested: number): Promise
 
 async function fetchGrantsPage(endpoint: string, requested: number): Promise<CachedGrantsResult> {
   try {
+    const offset = readEndpointInteger(endpoint, 'offset', 0);
+    const pipelinePayload = await fetchPipelineRecords(endpoint, 'grants', requested, offset);
+    if (pipelinePayload) {
+      const records = pipelinePayload.records?.map(compactGrantRecord) ?? [];
+      return {
+        requested,
+        count: records.length,
+        records,
+        total: pipelinePayload.total ?? null,
+        endpoint,
+        error: null
+      };
+    }
+
     const response = await fetch(endpoint);
 
     if (!response.ok) {
@@ -350,7 +474,8 @@ export async function hydrateProgressiveCachedGrantsResult(
   const target = clampCount(requested);
   const batchSize = clampCount(options.batchSize ?? 500);
   const finalEndpoint = updateGrantsEndpoint(endpoint, target, 0);
-  const cached = readCache<CachedGrantsResult>(GRANTS_CACHE_KEY, target);
+  const useCache = options.forceRefresh !== true;
+  const cached = useCache ? readCache<CachedGrantsResult>(GRANTS_CACHE_KEY, target) : null;
 
   if (cached) {
     const result = sliceGrantsResult(cached, target, finalEndpoint);
@@ -358,7 +483,7 @@ export async function hydrateProgressiveCachedGrantsResult(
     return result;
   }
 
-  const partialCache = readAnyCache<CachedGrantsResult>(GRANTS_CACHE_KEY);
+  const partialCache = useCache ? readAnyCache<CachedGrantsResult>(GRANTS_CACHE_KEY) : null;
   const records = partialCache?.records.slice(0, target) ?? [];
   let total = partialCache?.total ?? null;
 
@@ -443,7 +568,8 @@ export async function hydrateProgressiveCachedBenefitsResult(
 ): Promise<CachedBenefitsResult> {
   const target = clampCount(requested);
   const finalEndpoint = updateBenefitsEndpoint(endpoint, target);
-  const cached = readCache<CachedBenefitsResult>(BENEFITS_CACHE_KEY, target);
+  const useCache = options.forceRefresh !== true;
+  const cached = useCache ? readCache<CachedBenefitsResult>(BENEFITS_CACHE_KEY, target) : null;
 
   if (cached) {
     const result = sliceBenefitsResult(cached, target, finalEndpoint);
@@ -451,7 +577,7 @@ export async function hydrateProgressiveCachedBenefitsResult(
     return result;
   }
 
-  const partialCache = readAnyCache<CachedBenefitsResult>(BENEFITS_CACHE_KEY);
+  const partialCache = useCache ? readAnyCache<CachedBenefitsResult>(BENEFITS_CACHE_KEY) : null;
   if (partialCache?.records.length) {
     reportProgress(options, {
       loaded: Math.min(partialCache.records.length, target),
