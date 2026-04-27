@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import pytest
 
-from publicus_backend.schemas.opportunity_analysis import OpportunityFitJudgeCandidate, OpportunityFitJudgment, OpportunityMatchContext
+from publicus_backend.schemas.opportunity_analysis import (
+    OpportunityComparisonSide,
+    OpportunityFitJudgeCandidate,
+    OpportunityFitJudgment,
+    OpportunityMatchContext,
+)
 from publicus_backend.services.opportunity_analysis import (
     analyze_opportunity,
+    compare_opportunities,
     judge_opportunity_fits,
     normalize_analysis_payload,
+    normalize_comparison_payload,
     normalize_fit_judgment_response,
 )
 
@@ -124,3 +131,58 @@ def test_judge_opportunity_fits_falls_back_without_gemini_key(monkeypatch: pytes
     assert result["provider"] == "local-fallback"
     assert result["filter_available"] is False
     assert result["judgments"][0]["should_show"] is True
+
+
+def test_normalize_comparison_payload_uses_valid_recommendation_ref() -> None:
+    left = OpportunityComparisonSide(
+        record_ref="left-1",
+        opportunity={"title": "Left program"},
+        match=OpportunityMatchContext(title="Left program", match_score=82, potential_funding=100000),
+    )
+    right = OpportunityComparisonSide(
+        record_ref="right-1",
+        opportunity={"title": "Right program"},
+        match=OpportunityMatchContext(title="Right program", match_score=64, potential_funding=250000),
+    )
+
+    result = normalize_comparison_payload(
+        {
+            "recommended_ref": "unknown-ref",
+            "summary": "Choose the better first action.",
+            "decision_factors": ["Strong fit."],
+            "confidence": "high",
+        },
+        left=left,
+        right=right,
+    )
+
+    assert result["recommended_ref"] == "left-1"
+    assert result["summary"] == "Choose the better first action."
+    assert result["decision_factors"] == ["Strong fit."]
+    assert result["confidence"] == "high"
+
+
+def test_compare_opportunities_uses_local_fallback_without_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_GENERATIVE_AI_API_KEY", raising=False)
+
+    result = compare_opportunities(
+        profile={"province": "ON"},
+        left=OpportunityComparisonSide(
+            record_ref="left-1",
+            opportunity={"title": "Left program"},
+            match=OpportunityMatchContext(title="Left program", match_score=78, potential_funding=100000),
+        ),
+        right=OpportunityComparisonSide(
+            record_ref="right-1",
+            opportunity={"title": "Right program"},
+            match=OpportunityMatchContext(title="Right program", match_score=58, potential_funding=200000),
+        ),
+        timeout=5.0,
+    )
+
+    assert result["provider"] == "local-fallback"
+    assert result["comparison_available"] is False
+    assert result["recommended_ref"] == "left-1"
+    assert result["decision_factors"]

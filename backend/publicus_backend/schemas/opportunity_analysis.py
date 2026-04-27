@@ -59,6 +59,33 @@ class OpportunityAnalysisResponse(BaseModel):
     provider: str
 
 
+class OpportunityComparisonSide(BaseModel):
+    record_ref: str = Field(min_length=1, max_length=500)
+    opportunity: dict[str, Any] = Field(description="Raw active opportunity record.")
+    match: OpportunityMatchContext
+    fit_judgment: OpportunityFitJudgment | None = Field(default=None)
+
+
+class OpportunityComparisonRequest(BaseModel):
+    profile: dict[str, Any] = Field(description="Company profile used to compare the opportunities.")
+    left: OpportunityComparisonSide
+    right: OpportunityComparisonSide
+    timeout: float = Field(default=30.0, ge=5.0, le=120.0)
+
+
+class OpportunityComparisonResponse(BaseModel):
+    recommended_ref: str
+    summary: str
+    decision_factors: list[str]
+    tradeoffs: list[str]
+    risks: list[str]
+    next_steps: list[str]
+    confidence: AnalysisConfidence
+    provider: str
+    comparison_available: bool
+    unavailable_reason: str | None = None
+
+
 class OpportunityFitJudgeCandidate(BaseModel):
     record_ref: str = Field(min_length=1, max_length=500)
     opportunity: dict[str, Any] = Field(description="Raw active opportunity record.")

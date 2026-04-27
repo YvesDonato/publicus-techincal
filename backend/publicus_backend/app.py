@@ -11,7 +11,7 @@ load_root_env()
 
 from publicus_backend.routers import business_benefits, grants, health, opportunities, pipeline, profile_copilot, search
 
-DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+DEFAULT_CORS_ORIGINS = ""
 
 
 def create_app() -> FastAPI:

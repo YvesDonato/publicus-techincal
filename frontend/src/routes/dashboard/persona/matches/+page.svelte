@@ -27,10 +27,12 @@
   } from '$lib/client/semantic-scoring';
   import {
     fetchOpportunityAnalysis,
+    fetchOpportunityComparison,
     fetchOpportunityFitJudgments,
     getOpportunityAnalysisCacheKey,
     getOpportunityFitJudgmentCacheKey,
     type OpportunityAnalysis,
+    type OpportunityComparison,
     type OpportunityFitJudgment
   } from '$lib/client/opportunity-analysis';
   import {
@@ -299,6 +301,9 @@
   let analysisModalMatch = $state<BenefitMatch | null>(null);
   let comparisonRefs = $state<string[]>([]);
   let comparisonModalOpen = $state(false);
+  let opportunityComparisons = $state<Record<string, OpportunityComparison>>({});
+  let opportunityComparisonLoading = $state<Record<string, boolean>>({});
+  let opportunityComparisonErrors = $state<Record<string, string>>({});
   let shortlistHydrated = $state(false);
   let profileHydrated = $state(false);
   let profileSaved = $state(false);
@@ -356,6 +361,18 @@
       .filter((match): match is BenefitMatch => match !== null)
   );
   const comparisonReady = $derived(comparisonMatches.length === 2);
+  const activeComparisonLoadingKey = $derived(comparisonReady ? `${getCompareRef(comparisonMatches[0])}|${getCompareRef(comparisonMatches[1])}` : '');
+  const activeComparisonKey = $derived(comparisonReady ? getOpportunityComparisonKey(comparisonMatches[0], comparisonMatches[1]) : '');
+  const activeComparison = $derived(activeComparisonKey ? opportunityComparisons[activeComparisonKey] ?? null : null);
+  const activeComparisonLoading = $derived(
+    (activeComparisonKey ? opportunityComparisonLoading[activeComparisonKey] === true : false) ||
+      (activeComparisonLoadingKey ? opportunityComparisonLoading[activeComparisonLoadingKey] === true : false)
+  );
+  const activeComparisonError = $derived(
+    (activeComparisonKey ? opportunityComparisonErrors[activeComparisonKey] : '') ||
+      (activeComparisonLoadingKey ? opportunityComparisonErrors[activeComparisonLoadingKey] : '') ||
+      ''
+  );
 
   function createInitialData(): PersonaData {
     const filters = readClientFilters();
@@ -594,6 +611,14 @@
 
     lastOpportunityFitBatchKey = batchKey;
     void judgeVisibleOpportunityFits(visibleCandidateBenefitMatches);
+  });
+
+  $effect(() => {
+    if (!browser || !comparisonModalOpen || !comparisonReady || activeComparison || activeComparisonLoading) {
+      return;
+    }
+
+    void compareSelectedOpportunities(comparisonMatches[0], comparisonMatches[1]);
   });
 
   function createDefaultPersona(): CompanyPersona {
@@ -1409,6 +1434,54 @@
     comparisonModalOpen = false;
   }
 
+  async function compareSelectedOpportunities(left: BenefitMatch, right: BenefitMatch, forceRefresh = false) {
+    if (!browser) {
+      return;
+    }
+
+    const loadingKey = `${getCompareRef(left)}|${getCompareRef(right)}`;
+    if (opportunityComparisonLoading[loadingKey]) {
+      return;
+    }
+
+    opportunityComparisonLoading = { ...opportunityComparisonLoading, [loadingKey]: true };
+    opportunityComparisonErrors = { ...opportunityComparisonErrors, [loadingKey]: '' };
+
+    try {
+      const [leftFitJudgment, rightFitJudgment] = await Promise.all([
+        ensureOpportunityFitJudgment(left),
+        ensureOpportunityFitJudgment(right)
+      ]);
+      const key = getOpportunityComparisonKey(left, right, leftFitJudgment, rightFitJudgment);
+      const comparison = await fetchOpportunityComparison({
+        backendApiUrl: getBackendApiUrl(data.innovation.endpoint),
+        profile: persona,
+        left,
+        right,
+        leftDescription: getOpportunityDescription(left),
+        rightDescription: getOpportunityDescription(right),
+        leftFitJudgment,
+        rightFitJudgment,
+        forceRefresh
+      });
+
+      opportunityComparisons = { ...opportunityComparisons, [key]: comparison };
+    } catch (error) {
+      opportunityComparisonErrors = {
+        ...opportunityComparisonErrors,
+        [loadingKey]: error instanceof Error ? error.message : 'Could not compare these opportunities.'
+      };
+    } finally {
+      opportunityComparisonLoading = { ...opportunityComparisonLoading, [loadingKey]: false };
+    }
+  }
+
+  function refreshOpportunityComparison() {
+    if (comparisonReady && !activeComparisonLoading) {
+      void compareSelectedOpportunities(comparisonMatches[0], comparisonMatches[1], true);
+    }
+  }
+
   async function judgeVisibleOpportunityFits(matches: BenefitMatch[]) {
     if (!browser || matches.length === 0) {
       return;
@@ -1746,6 +1819,24 @@
     return getBenefitMatchRef(match) ?? `match:${getOpportunityTitle(match)}|${getOpportunitySponsor(match)}`;
   }
 
+  function getOpportunityComparisonKey(
+    left: BenefitMatch,
+    right: BenefitMatch,
+    leftFitJudgment: OpportunityFitJudgment | null = getActiveOpportunityFitJudgment(left),
+    rightFitJudgment: OpportunityFitJudgment | null = getActiveOpportunityFitJudgment(right)
+  ): string {
+    return [
+      getCompareRef(left),
+      getCompareRef(right),
+      left.matchScore,
+      right.matchScore,
+      left.potentialFunding ?? 'none',
+      right.potentialFunding ?? 'none',
+      leftFitJudgment?.fit ?? 'unjudged',
+      rightFitJudgment?.fit ?? 'unjudged'
+    ].join('|');
+  }
+
   function getOpportunityTitle(match: BenefitMatch): string {
     return getRecordFieldValue(match.record, titleFields) ?? 'Funding opportunity';
   }
@@ -2011,6 +2102,36 @@
       {@render analysisList('Why it matches', match.reasons)}
       {@render analysisList('Risks', match.risks)}
       {@render analysisList('Next actions', match.nextActions)}
+    </div>
+  </section>
+{/snippet}
+
+{#snippet opportunityComparisonAnalysisPanel(comparison: OpportunityComparison, left: BenefitMatch, right: BenefitMatch)}
+  {@const recommendedMatch = comparison.recommended_ref === getCompareRef(right) ? right : left}
+  <section class="rounded-lg border border-emerald-100 bg-emerald-50/80 p-4 text-sm text-[#25302a]" aria-label="LLM opportunity comparison">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <p class="m-0 text-xs font-black tracking-normal text-emerald-700 uppercase">LLM recommendation</p>
+        <h3 class="m-0 mt-1 text-xl leading-tight text-[#191c1e]">{getOpportunityTitle(recommendedMatch)}</h3>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-[#45464d] uppercase">{comparison.confidence} confidence</span>
+        {#if !comparison.comparison_available}
+          <span class="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-black text-amber-700 uppercase">Local fallback</span>
+        {/if}
+      </div>
+    </div>
+
+    <p class="m-0 mt-3 leading-6 text-[#25302a]">{comparison.summary}</p>
+    {#if comparison.unavailable_reason}
+      <p class="m-0 mt-2 rounded-md border border-white bg-white/70 px-3 py-2 leading-5 text-[#45464d]">{comparison.unavailable_reason}</p>
+    {/if}
+
+    <div class="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+      {@render analysisList('Decision factors', comparison.decision_factors)}
+      {@render analysisList('Tradeoffs', comparison.tradeoffs)}
+      {@render analysisList('Risks', comparison.risks)}
+      {@render analysisList('Next steps', comparison.next_steps)}
     </div>
   </section>
 {/snippet}
@@ -2595,6 +2716,24 @@
       </header>
 
       <div class="grid gap-5 overflow-y-auto p-5">
+        {#if activeComparisonLoading}
+          <section class="rounded-lg border border-emerald-100 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950" role="status">
+            Comparing the selected opportunities with Gemini for {applicantName}.
+          </section>
+        {/if}
+
+        {#if activeComparison}
+          {@render opportunityComparisonAnalysisPanel(activeComparison, leftComparisonMatch, rightComparisonMatch)}
+        {:else if activeComparisonError}
+          <section class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-800" role="alert">
+            {activeComparisonError}
+          </section>
+        {:else if !activeComparisonLoading}
+          <section class="rounded-lg border border-slate-200 bg-white p-4 text-sm leading-6 text-[#45464d]" role="status">
+            LLM comparison is ready to run for the selected opportunities.
+          </section>
+        {/if}
+
         <div class="grid grid-cols-2 gap-5 max-[900px]:grid-cols-1">
           {@render comparisonOpportunityPanel(leftComparisonMatch, rightComparisonMatch)}
           {@render comparisonOpportunityPanel(rightComparisonMatch, leftComparisonMatch)}
@@ -2605,9 +2744,19 @@
         <button class={secondaryButtonClass} type="button" onclick={clearComparison}>
           Clear comparison
         </button>
-        <button class={secondaryButtonClass} type="button" onclick={closeComparisonModal}>
-          Close
-        </button>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button
+            class="inline-flex items-center justify-center rounded-lg border border-emerald-700 bg-emerald-700 px-3.5 py-3 leading-none font-extrabold text-white no-underline hover:border-emerald-800 hover:bg-emerald-800 focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-emerald-200 disabled:cursor-wait disabled:border-slate-300 disabled:bg-white disabled:text-[#45464d] disabled:opacity-100"
+            disabled={activeComparisonLoading}
+            type="button"
+            onclick={refreshOpportunityComparison}
+          >
+            {activeComparison ? 'Refresh comparison' : activeComparisonError ? 'Retry comparison' : 'Run comparison'}
+          </button>
+          <button class={secondaryButtonClass} type="button" onclick={closeComparisonModal}>
+            Close
+          </button>
+        </div>
       </footer>
     </div>
   </div>

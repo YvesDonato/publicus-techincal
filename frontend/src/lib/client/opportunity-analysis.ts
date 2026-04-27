@@ -35,6 +35,18 @@ export type OpportunityFitJudgmentResult = {
   filter_available: boolean;
   unavailable_reason: string | null;
 };
+export type OpportunityComparison = {
+  recommended_ref: string;
+  summary: string;
+  decision_factors: string[];
+  tradeoffs: string[];
+  risks: string[];
+  next_steps: string[];
+  confidence: 'low' | 'medium' | 'high';
+  provider: string;
+  comparison_available: boolean;
+  unavailable_reason: string | null;
+};
 
 type FetchOpportunityAnalysisOptions<TRecord extends GenericRecord> = {
   backendApiUrl: string;
@@ -54,12 +66,30 @@ type FetchOpportunityFitJudgmentsOptions<TRecord extends GenericRecord> = {
   timeout?: number;
 };
 
+type FetchOpportunityComparisonOptions<TRecord extends GenericRecord> = {
+  backendApiUrl: string;
+  profile: CompanyProfile;
+  left: OpportunityBenefitMatch<TRecord>;
+  right: OpportunityBenefitMatch<TRecord>;
+  leftDescription: string;
+  rightDescription: string;
+  leftFitJudgment?: OpportunityFitJudgment | null;
+  rightFitJudgment?: OpportunityFitJudgment | null;
+  timeout?: number;
+  forceRefresh?: boolean;
+};
+
 type CachedOpportunityAnalysis = {
   savedAt: number;
   analysis: OpportunityAnalysis;
 };
 
 type OpportunityAnalysisCache = Record<string, CachedOpportunityAnalysis>;
+type CachedOpportunityComparison = {
+  savedAt: number;
+  comparison: OpportunityComparison;
+};
+type OpportunityComparisonCache = Record<string, CachedOpportunityComparison>;
 type CachedOpportunityFitJudgment = {
   savedAt: number;
   judgment: OpportunityFitJudgment;
@@ -69,6 +99,9 @@ type OpportunityFitJudgmentCache = Record<string, CachedOpportunityFitJudgment>;
 const OPPORTUNITY_ANALYSIS_CACHE_KEY = 'fundradar.opportunityAnalysis.v2';
 const OPPORTUNITY_ANALYSIS_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const OPPORTUNITY_ANALYSIS_CACHE_MAX_ENTRIES = 250;
+const OPPORTUNITY_COMPARISON_CACHE_KEY = 'fundradar.opportunityComparison.v1';
+const OPPORTUNITY_COMPARISON_CACHE_TTL_MS = OPPORTUNITY_ANALYSIS_CACHE_TTL_MS;
+const OPPORTUNITY_COMPARISON_CACHE_MAX_ENTRIES = 150;
 const OPPORTUNITY_FIT_JUDGMENT_CACHE_KEY = 'fundradar.opportunityFitJudgments.v1';
 const OPPORTUNITY_FIT_JUDGMENT_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const OPPORTUNITY_FIT_JUDGMENT_CACHE_MAX_ENTRIES = 500;
@@ -221,6 +254,57 @@ export async function fetchOpportunityFitJudgments<TRecord extends GenericRecord
   };
 }
 
+export async function fetchOpportunityComparison<TRecord extends GenericRecord>({
+  backendApiUrl,
+  profile,
+  left,
+  right,
+  leftDescription,
+  rightDescription,
+  leftFitJudgment = null,
+  rightFitJudgment = null,
+  timeout = 30,
+  forceRefresh = false
+}: FetchOpportunityComparisonOptions<TRecord>): Promise<OpportunityComparison> {
+  const cacheKey = buildOpportunityComparisonCacheKey(
+    profile,
+    left,
+    right,
+    leftDescription,
+    rightDescription,
+    leftFitJudgment,
+    rightFitJudgment
+  );
+
+  if (!forceRefresh) {
+    const cached = readCachedOpportunityComparison(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  const response = await fetch(`${backendApiUrl.replace(/\/$/, '')}/api/opportunities/compare`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      profile,
+      left: buildOpportunityComparisonSidePayload(left, leftDescription, leftFitJudgment),
+      right: buildOpportunityComparisonSidePayload(right, rightDescription, rightFitJudgment),
+      timeout
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error((await readApiError(response)) ?? 'Could not compare these opportunities.');
+  }
+
+  const comparison = normalizeOpportunityComparison(await response.json());
+  writeCachedOpportunityComparison(cacheKey, comparison);
+  return comparison;
+}
+
 function readCachedOpportunityAnalysis(cacheKey: string): OpportunityAnalysis | null {
   const cache = readOpportunityAnalysisCache();
   const cached = cache[cacheKey];
@@ -232,6 +316,17 @@ function readCachedOpportunityAnalysis(cacheKey: string): OpportunityAnalysis | 
   return cached.analysis;
 }
 
+function readCachedOpportunityComparison(cacheKey: string): OpportunityComparison | null {
+  const cache = readOpportunityComparisonCache();
+  const cached = cache[cacheKey];
+
+  if (!cached || Date.now() - cached.savedAt > OPPORTUNITY_COMPARISON_CACHE_TTL_MS) {
+    return null;
+  }
+
+  return cached.comparison;
+}
+
 function writeCachedOpportunityAnalysis(cacheKey: string, analysis: OpportunityAnalysis) {
   const cache = readOpportunityAnalysisCache();
   cache[cacheKey] = {
@@ -240,6 +335,16 @@ function writeCachedOpportunityAnalysis(cacheKey: string, analysis: OpportunityA
   };
 
   writeOpportunityAnalysisCache(pruneOpportunityAnalysisCache(cache));
+}
+
+function writeCachedOpportunityComparison(cacheKey: string, comparison: OpportunityComparison) {
+  const cache = readOpportunityComparisonCache();
+  cache[cacheKey] = {
+    savedAt: Date.now(),
+    comparison
+  };
+
+  writeOpportunityComparisonCache(pruneOpportunityComparisonCache(cache));
 }
 
 function readCachedOpportunityFitJudgments(cacheKeys: string[]): Record<string, OpportunityFitJudgment> {
@@ -295,6 +400,24 @@ function buildOpportunityAnalysisCacheKey<TRecord extends GenericRecord>(
   ].join('|');
 }
 
+function buildOpportunityComparisonCacheKey<TRecord extends GenericRecord>(
+  profile: CompanyProfile,
+  left: OpportunityBenefitMatch<TRecord>,
+  right: OpportunityBenefitMatch<TRecord>,
+  leftDescription: string,
+  rightDescription: string,
+  leftFitJudgment: OpportunityFitJudgment | null,
+  rightFitJudgment: OpportunityFitJudgment | null
+): string {
+  return [
+    'compare',
+    'business-benefits',
+    hashString(stableStringify(profileAnalysisCacheShape(profile))),
+    hashString(stableStringify(comparisonSideCacheShape(left, leftDescription, leftFitJudgment))),
+    hashString(stableStringify(comparisonSideCacheShape(right, rightDescription, rightFitJudgment)))
+  ].join('|');
+}
+
 function buildOpportunityFitJudgmentCacheKey<TRecord extends GenericRecord>(
   profile: CompanyProfile,
   match: OpportunityBenefitMatch<TRecord>,
@@ -316,6 +439,19 @@ function getOpportunityRecordRef<TRecord extends GenericRecord>(match: Opportuni
   return getOpportunityBenefitRef(match) ?? hashString(stableStringify(recordAnalysisCacheShape(match.record)));
 }
 
+function buildOpportunityComparisonSidePayload<TRecord extends GenericRecord>(
+  match: OpportunityBenefitMatch<TRecord>,
+  description: string,
+  fitJudgment: OpportunityFitJudgment | null
+) {
+  return {
+    record_ref: getOpportunityRecordRef(match),
+    opportunity: match.record,
+    match: buildOpportunityMatchPayload(match, description),
+    fit_judgment: fitJudgment
+  };
+}
+
 function buildOpportunityMatchPayload<TRecord extends GenericRecord>(match: OpportunityBenefitMatch<TRecord>, description: string) {
   return {
     source: 'business-benefits',
@@ -331,6 +467,23 @@ function buildOpportunityMatchPayload<TRecord extends GenericRecord>(match: Oppo
     reasons: match.reasons,
     risks: match.risks,
     next_actions: match.nextActions
+  };
+}
+
+function comparisonSideCacheShape<TRecord extends GenericRecord>(
+  match: OpportunityBenefitMatch<TRecord>,
+  description: string,
+  fitJudgment: OpportunityFitJudgment | null
+): Record<string, unknown> {
+  return {
+    record_ref: getOpportunityRecordRef(match),
+    record: recordAnalysisCacheShape(match.record),
+    description,
+    matchScore: match.matchScore,
+    semanticScore: match.semanticScore ?? null,
+    ruleScore: match.ruleScore ?? null,
+    potentialFunding: match.potentialFunding,
+    fitJudgment: fitJudgmentAnalysisCacheShape(fitJudgment)
   };
 }
 
@@ -381,6 +534,22 @@ function normalizeOpportunityAnalysis(value: unknown): OpportunityAnalysis {
     questions_to_answer: readStringList(payload.questions_to_answer),
     confidence: readConfidence(payload.confidence),
     provider: readString(payload.provider, 'google')
+  };
+}
+
+function normalizeOpportunityComparison(value: unknown): OpportunityComparison {
+  const payload = isRecord(value) ? value : {};
+  return {
+    recommended_ref: readString(payload.recommended_ref, ''),
+    summary: readString(payload.summary, 'Review both opportunities against the company profile before deciding.'),
+    decision_factors: readStringList(payload.decision_factors),
+    tradeoffs: readStringList(payload.tradeoffs),
+    risks: readStringList(payload.risks),
+    next_steps: readStringList(payload.next_steps),
+    confidence: readConfidence(payload.confidence),
+    provider: readString(payload.provider, 'google'),
+    comparison_available: payload.comparison_available === true,
+    unavailable_reason: typeof payload.unavailable_reason === 'string' ? payload.unavailable_reason : null
   };
 }
 
@@ -467,9 +636,27 @@ function readOpportunityAnalysisCache(): OpportunityAnalysisCache {
   }
 }
 
+function readOpportunityComparisonCache(): OpportunityComparisonCache {
+  try {
+    const rawValue = localStorage.getItem(OPPORTUNITY_COMPARISON_CACHE_KEY);
+    const parsed: unknown = rawValue ? JSON.parse(rawValue) : {};
+    return isRecord(parsed) ? (parsed as OpportunityComparisonCache) : {};
+  } catch {
+    return {};
+  }
+}
+
 function writeOpportunityAnalysisCache(cache: OpportunityAnalysisCache) {
   try {
     localStorage.setItem(OPPORTUNITY_ANALYSIS_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // localStorage can be unavailable in private windows or locked-down browsers.
+  }
+}
+
+function writeOpportunityComparisonCache(cache: OpportunityComparisonCache) {
+  try {
+    localStorage.setItem(OPPORTUNITY_COMPARISON_CACHE_KEY, JSON.stringify(cache));
   } catch {
     // localStorage can be unavailable in private windows or locked-down browsers.
   }
@@ -499,6 +686,16 @@ function pruneOpportunityAnalysisCache(cache: OpportunityAnalysisCache): Opportu
     .filter(([, value]) => now - value.savedAt <= OPPORTUNITY_ANALYSIS_CACHE_TTL_MS)
     .sort(([, left], [, right]) => right.savedAt - left.savedAt)
     .slice(0, OPPORTUNITY_ANALYSIS_CACHE_MAX_ENTRIES);
+
+  return Object.fromEntries(entries);
+}
+
+function pruneOpportunityComparisonCache(cache: OpportunityComparisonCache): OpportunityComparisonCache {
+  const now = Date.now();
+  const entries = Object.entries(cache)
+    .filter(([, value]) => now - value.savedAt <= OPPORTUNITY_COMPARISON_CACHE_TTL_MS)
+    .sort(([, left], [, right]) => right.savedAt - left.savedAt)
+    .slice(0, OPPORTUNITY_COMPARISON_CACHE_MAX_ENTRIES);
 
   return Object.fromEntries(entries);
 }

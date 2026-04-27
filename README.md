@@ -118,14 +118,14 @@ Run the frontend:
 npm --prefix frontend run dev -- --host 0.0.0.0
 ```
 
-The frontend uses same-origin `/api/...` URLs by default. In local development, SvelteKit proxies those requests to the FastAPI server at `http://127.0.0.1:8000`.
+The frontend uses same-origin `/api/...` URLs by default. Set `INTERNAL_BACKEND_API_URL` or `BACKEND_API_URL` to the FastAPI origin for the environment running SvelteKit.
 
 ## Docker and Coolify
 
 The repository includes a root `Dockerfile` for Coolify. It builds the SvelteKit app, installs the FastAPI backend dependencies, and runs both services in one container:
 
 - SvelteKit listens on `PORT`, default `3000`.
-- FastAPI listens internally on `127.0.0.1:${BACKEND_PORT}`, default `8000`.
+- FastAPI listens internally on `BACKEND_HOST:${BACKEND_PORT}`, default host `127.0.0.1` and port `8000`.
 - Browser requests to `/api/...` are handled by SvelteKit and proxied to FastAPI through `INTERNAL_BACKEND_API_URL`.
 
 Coolify setup:
@@ -167,9 +167,9 @@ Common backend and pipeline variables:
 
 ```bash
 PUBLIC_BACKEND_API_URL=
-BACKEND_API_URL=http://127.0.0.1:8000
-INTERNAL_BACKEND_API_URL=http://127.0.0.1:8000
-PUBLICUS_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+BACKEND_API_URL=
+INTERNAL_BACKEND_API_URL=
+PUBLICUS_CORS_ORIGINS=
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 PUBLICUS_PIPELINE_ADMIN_TOKEN=

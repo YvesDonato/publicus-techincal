@@ -7,7 +7,12 @@ from typing import Any
 
 import httpx
 
-from publicus_backend.schemas.opportunity_analysis import OpportunityFitJudgeCandidate, OpportunityFitJudgment, OpportunityMatchContext
+from publicus_backend.schemas.opportunity_analysis import (
+    OpportunityComparisonSide,
+    OpportunityFitJudgeCandidate,
+    OpportunityFitJudgment,
+    OpportunityMatchContext,
+)
 
 
 class OpportunityAnalysisUnavailable(RuntimeError):
@@ -90,6 +95,43 @@ def analyze_opportunity(
             profile=profile,
             match=match,
             fit_judgment=fit_judgment,
+            unavailable_reason=get_gemini_unavailable_reason(exc),
+        )
+
+
+def compare_opportunities(
+    *,
+    profile: dict[str, Any],
+    left: OpportunityComparisonSide,
+    right: OpportunityComparisonSide,
+    timeout: float,
+) -> dict[str, Any]:
+    api_key = google_api_key()
+    if not api_key:
+        return build_local_comparison(
+            profile=profile,
+            left=left,
+            right=right,
+            unavailable_reason="Gemini is not configured, so FundRadar used the scored match signals.",
+        )
+
+    try:
+        payload = call_gemini_opportunity_analysis(
+            prompt=build_comparison_prompt(profile=profile, left=left, right=right),
+            api_key=api_key,
+            timeout=timeout,
+        )
+        parsed = parse_gemini_json(payload)
+        normalized = normalize_comparison_payload(parsed, left=left, right=right)
+        normalized["provider"] = "google"
+        normalized["comparison_available"] = True
+        normalized["unavailable_reason"] = None
+        return normalized
+    except (OpportunityAnalysisUnavailable, httpx.HTTPError) as exc:
+        return build_local_comparison(
+            profile=profile,
+            left=left,
+            right=right,
             unavailable_reason=get_gemini_unavailable_reason(exc),
         )
 
@@ -493,6 +535,60 @@ def build_opportunity_prompt(
     )
 
 
+def build_comparison_prompt(*, profile: dict[str, Any], left: OpportunityComparisonSide, right: OpportunityComparisonSide) -> str:
+    schema = {
+        "recommended_ref": "one of the supplied record_ref values",
+        "summary": "2 concise sentences explaining which opportunity to pursue first and why",
+        "decision_factors": ["specific evidence that supports the recommendation"],
+        "tradeoffs": ["ways the non-recommended opportunity may still be useful"],
+        "risks": ["risks or missing facts to verify before applying"],
+        "next_steps": ["practical next steps for the recommended path"],
+        "confidence": "low | medium | high",
+    }
+
+    return (
+        "You are FundRadar's Canadian funding analyst. Compare two active funding opportunities for one company profile.\n"
+        "Choose which opportunity the company should pursue first. Use only the supplied profile, opportunity records, match context, "
+        "and fit-filter judgments. Do not invent eligibility, deadlines, funding amounts, application requirements, or guarantees. "
+        "recommended_ref must exactly equal one supplied record_ref. If both options are close, still pick the stronger first action "
+        "and explain the tradeoff. Return only valid JSON matching the response shape.\n\n"
+        f"Response shape:\n{json.dumps(schema, ensure_ascii=False)}\n\n"
+        f"Company profile:\n{compact_json(profile)}\n\n"
+        f"Left opportunity:\n{compact_json(comparison_side_context(left))}\n\n"
+        f"Right opportunity:\n{compact_json(comparison_side_context(right))}"
+    )
+
+
+def comparison_side_context(side: OpportunityComparisonSide) -> dict[str, Any]:
+    return {
+        "record_ref": side.record_ref,
+        "opportunity": side.opportunity,
+        "match": {
+            "title": side.match.title,
+            "sponsor": side.match.sponsor,
+            "description": side.match.description,
+            "deadline": side.match.deadline,
+            "status_label": side.match.status_label,
+            "match_score": side.match.match_score,
+            "semantic_score": side.match.semantic_score,
+            "rule_score": side.match.rule_score,
+            "potential_funding": side.match.potential_funding,
+            "reasons": side.match.reasons,
+            "risks": side.match.risks,
+            "next_actions": side.match.next_actions,
+        },
+        "fit_judgment": {
+            "fit": side.fit_judgment.fit,
+            "should_show": side.fit_judgment.should_show,
+            "confidence": side.fit_judgment.confidence,
+            "reason": side.fit_judgment.reason,
+            "risk_notes": side.fit_judgment.risk_notes,
+        }
+        if side.fit_judgment
+        else None,
+    }
+
+
 def parse_gemini_json(payload: dict[str, Any]) -> dict[str, Any]:
     candidates = payload.get("candidates")
     if not isinstance(candidates, list) or not candidates:
@@ -516,6 +612,134 @@ def parse_gemini_json(payload: dict[str, Any]) -> dict[str, Any]:
         raise OpportunityAnalysisUnavailable("Gemini returned JSON in an unexpected shape.")
 
     return parsed
+
+
+def normalize_comparison_payload(
+    payload: dict[str, Any],
+    *,
+    left: OpportunityComparisonSide,
+    right: OpportunityComparisonSide,
+) -> dict[str, Any]:
+    comparison = payload.get("comparison") if isinstance(payload.get("comparison"), dict) else payload
+    if not isinstance(comparison, dict):
+        comparison = {}
+
+    fallback_ref = choose_local_recommendation(left, right).record_ref
+    recommended_ref = normalize_string(comparison.get("recommended_ref"), fallback_ref, max_length=500)
+    if recommended_ref not in {left.record_ref, right.record_ref}:
+        recommended_ref = fallback_ref
+
+    recommended = left if recommended_ref == left.record_ref else right
+    other = right if recommended_ref == left.record_ref else left
+    fallback_summary = (
+        f"FundRadar recommends pursuing {side_title(recommended)} first because it has the stronger current funding match. "
+        f"Keep {side_title(other)} on the shortlist if its tradeoffs fit the project timeline."
+    )
+
+    return {
+        "recommended_ref": recommended_ref,
+        "summary": normalize_string(comparison.get("summary"), fallback_summary, max_length=620),
+        "decision_factors": normalize_string_list(comparison.get("decision_factors"), max_items=6, max_length=180)
+        or local_comparison_factors(recommended, other),
+        "tradeoffs": normalize_string_list(comparison.get("tradeoffs"), max_items=5, max_length=180)
+        or [f"{side_title(other)} may still be useful if its sponsor or timing is easier to validate."],
+        "risks": normalize_string_list(comparison.get("risks"), max_items=5, max_length=180)
+        or list_from_candidates([*recommended.match.risks[:3], *other.match.risks[:2]], fallback=["Confirm eligibility on the official program page."], max_items=5),
+        "next_steps": normalize_string_list(comparison.get("next_steps"), max_items=5, max_length=180)
+        or list_from_candidates(recommended.match.next_actions, fallback=["Verify intake status and applicant eligibility before applying."], max_items=5),
+        "confidence": normalize_confidence(comparison.get("confidence")),
+    }
+
+
+def build_local_comparison(
+    *,
+    profile: dict[str, Any],
+    left: OpportunityComparisonSide,
+    right: OpportunityComparisonSide,
+    unavailable_reason: str,
+) -> dict[str, Any]:
+    recommended = choose_local_recommendation(left, right)
+    other = right if recommended.record_ref == left.record_ref else left
+    factors = local_comparison_factors(recommended, other)
+    risks = list_from_candidates(
+        [*(recommended.fit_judgment.risk_notes[:2] if recommended.fit_judgment else []), *recommended.match.risks[:3], unavailable_reason],
+        fallback=[unavailable_reason],
+        max_items=5,
+    )
+
+    return {
+        "recommended_ref": recommended.record_ref,
+        "summary": (
+            f"FundRadar recommends pursuing {side_title(recommended)} first based on the current scored match signals. "
+            f"{side_title(other)} should stay under review if its deadline, sponsor, or eligible activities are easier to confirm."
+        ),
+        "decision_factors": factors,
+        "tradeoffs": [
+            f"{side_title(other)} may still be worth pursuing if the official criteria better match the project.",
+            "The local fallback cannot read new program guidance beyond the loaded records.",
+        ],
+        "risks": risks,
+        "next_steps": list_from_candidates(
+            recommended.match.next_actions,
+            fallback=["Confirm deadline, applicant type, eligible costs, and application documents on the official program page."],
+            max_items=5,
+        ),
+        "confidence": confidence_from_score(recommended.match.match_score),
+        "provider": "local-fallback",
+        "comparison_available": False,
+        "unavailable_reason": unavailable_reason,
+    }
+
+
+def choose_local_recommendation(left: OpportunityComparisonSide, right: OpportunityComparisonSide) -> OpportunityComparisonSide:
+    left_score = local_comparison_score(left, right)
+    right_score = local_comparison_score(right, left)
+    return left if left_score >= right_score else right
+
+
+def local_comparison_score(side: OpportunityComparisonSide, peer: OpportunityComparisonSide) -> float:
+    score = side.match.match_score
+    if side.match.potential_funding and peer.match.potential_funding:
+        if side.match.potential_funding > peer.match.potential_funding:
+            score += 5
+        elif side.match.potential_funding < peer.match.potential_funding:
+            score -= 2
+    elif side.match.potential_funding:
+        score += 3
+
+    score -= min(8, len(side.match.risks) * 2)
+    if side.fit_judgment:
+        if side.fit_judgment.fit == "strong":
+            score += 5
+        elif side.fit_judgment.fit == "weak":
+            score -= 10
+        if side.fit_judgment.should_show is False:
+            score -= 15
+    return score
+
+
+def local_comparison_factors(recommended: OpportunityComparisonSide, other: OpportunityComparisonSide) -> list[str]:
+    funding_signal = ""
+    if recommended.match.potential_funding and other.match.potential_funding:
+        if recommended.match.potential_funding >= other.match.potential_funding:
+            funding_signal = f"Potential funding signal is at least as strong as {side_title(other)}."
+    elif recommended.match.potential_funding:
+        funding_signal = "This option has a usable potential funding signal."
+
+    return list_from_candidates(
+        [
+            f"Match score is {round(recommended.match.match_score)}% versus {round(other.match.match_score)}% for {side_title(other)}.",
+            funding_signal,
+            recommended.fit_judgment.reason if recommended.fit_judgment else "",
+            *recommended.match.reasons[:3],
+        ],
+        fallback=[f"{side_title(recommended)} has the stronger combined score."],
+        max_items=5,
+    )
+
+
+def side_title(side: OpportunityComparisonSide) -> str:
+    return normalize_string(side.match.title, "the recommended opportunity", max_length=180)
 
 
 def normalize_analysis_payload(

@@ -1,7 +1,7 @@
 import { env } from '$env/dynamic/private';
+import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
-const DEFAULT_INTERNAL_BACKEND_API_URL = 'http://127.0.0.1:8000';
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -50,10 +50,10 @@ function buildBackendUrl(path: string, search: string): string {
 }
 
 function backendBaseUrl(): string {
-  const configuredUrl = env.INTERNAL_BACKEND_API_URL || env.BACKEND_API_URL || DEFAULT_INTERNAL_BACKEND_API_URL;
+  const configuredUrl = env.INTERNAL_BACKEND_API_URL || env.BACKEND_API_URL;
 
-  if (configuredUrl.startsWith('/')) {
-    return DEFAULT_INTERNAL_BACKEND_API_URL;
+  if (!configuredUrl || configuredUrl.startsWith('/')) {
+    return 'http://127.0.0.1:8000';
   }
 
   return configuredUrl.replace(/\/$/, '');

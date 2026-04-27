@@ -135,7 +135,7 @@ function clampCount(value: number): number {
 }
 
 function endpointUrl(endpoint: string): URL {
-  const base = typeof window === 'undefined' ? 'http://localhost' : window.location.origin;
+  const base = typeof window === 'undefined' ? 'https://publicus.invalid' : window.location.origin;
   return new URL(endpoint, base);
 }
 

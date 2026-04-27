@@ -6,10 +6,17 @@ from publicus_backend.core.errors import api_error
 from publicus_backend.schemas.opportunity_analysis import (
     OpportunityAnalysisRequest,
     OpportunityAnalysisResponse,
+    OpportunityComparisonRequest,
+    OpportunityComparisonResponse,
     OpportunityFitJudgeRequest,
     OpportunityFitJudgeResponse,
 )
-from publicus_backend.services.opportunity_analysis import OpportunityAnalysisUnavailable, analyze_opportunity, judge_opportunity_fits
+from publicus_backend.services.opportunity_analysis import (
+    OpportunityAnalysisUnavailable,
+    analyze_opportunity,
+    compare_opportunities,
+    judge_opportunity_fits,
+)
 
 
 router = APIRouter(prefix="/api/opportunities", tags=["opportunities"])
@@ -23,6 +30,23 @@ def analyze_opportunity_match(request: OpportunityAnalysisRequest) -> dict[str, 
             opportunity=request.opportunity,
             match=request.match,
             fit_judgment=request.fit_judgment,
+            timeout=request.timeout,
+        )
+    except OpportunityAnalysisUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise api_error(exc) from exc
+
+
+@router.post("/compare", response_model=OpportunityComparisonResponse)
+def compare_opportunity_matches(request: OpportunityComparisonRequest) -> dict[str, object]:
+    try:
+        return compare_opportunities(
+            profile=request.profile,
+            left=request.left,
+            right=request.right,
             timeout=request.timeout,
         )
     except OpportunityAnalysisUnavailable as exc:
