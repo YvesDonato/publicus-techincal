@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from publicus_backend.schemas.opportunity_analysis import OpportunityFitJudgeCandidate, OpportunityMatchContext
+from publicus_backend.schemas.opportunity_analysis import OpportunityFitJudgeCandidate, OpportunityFitJudgment, OpportunityMatchContext
 from publicus_backend.services.opportunity_analysis import (
     analyze_opportunity,
     judge_opportunity_fits,
@@ -25,6 +25,8 @@ def test_normalize_analysis_payload_bounds_and_confidence() -> None:
     )
 
     assert result["fit_summary"] == "Strong match. Verify the applicant rules."
+    assert result["fit"] == "possible"
+    assert result["should_show"] is True
     assert result["eligibility_flags"] == ["Ontario signal", "SME language"]
     assert result["confidence"] == "high"
 
@@ -43,6 +45,35 @@ def test_analyze_opportunity_uses_local_fallback_without_gemini_key(monkeypatch:
 
     assert result["provider"] == "local-fallback"
     assert result["confidence"] == "high"
+    assert result["fit"] == "possible"
+    assert result["should_show"] is True
+
+
+def test_analyze_opportunity_respects_supplied_fit_judgment_without_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_GENERATIVE_AI_API_KEY", raising=False)
+
+    result = analyze_opportunity(
+        profile={"province": "ON"},
+        opportunity={"title": "Test program"},
+        match=OpportunityMatchContext(match_score=82, reasons=["Keyword overlap."]),
+        fit_judgment=OpportunityFitJudgment(
+            record_ref="benefit-1",
+            fit="weak",
+            should_show=False,
+            confidence="high",
+            reason="The program is for nonprofits, but the company is for-profit.",
+            risk_notes=["Applicant type conflicts with the opportunity."],
+        ),
+        timeout=5.0,
+    )
+
+    assert result["provider"] == "local-fallback"
+    assert result["fit"] == "weak"
+    assert result["should_show"] is False
+    assert result["confidence"] == "high"
+    assert any("Applicant type conflicts" in note for note in result["risk_notes"])
 
 
 def test_normalize_fit_judgment_response_keeps_low_confidence_weak_visible() -> None:

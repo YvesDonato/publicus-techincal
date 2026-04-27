@@ -87,7 +87,7 @@
       error: string | null;
     };
   };
-  const DEFAULT_BACKEND_API_URL = 'http://127.0.0.1:8000';
+  const DEFAULT_BACKEND_API_URL = '';
   const MAX_COUNT = 5000;
   const pageShellClass =
     'flex h-screen overflow-hidden bg-[#f7f9fb] font-[Inter,ui-sans-serif,system-ui,sans-serif] text-[#191c1e]';
@@ -297,6 +297,8 @@
   let showLlmExcluded = $state(false);
   let lastOpportunityFitBatchKey = '';
   let analysisModalMatch = $state<BenefitMatch | null>(null);
+  let comparisonRefs = $state<string[]>([]);
+  let comparisonModalOpen = $state(false);
   let shortlistHydrated = $state(false);
   let profileHydrated = $state(false);
   let profileSaved = $state(false);
@@ -345,8 +347,15 @@
   const historicalEvidenceCount = $derived(grantMatches.filter((match) => match.matchScore >= 55 && match.amount !== null).length);
   const applicantName = $derived(persona.doingBusinessAs || persona.legalEntityName || 'your company');
   const analysisModalAnalysis = $derived(analysisModalMatch ? getOpportunityAnalysis(analysisModalMatch) : null);
+  const analysisModalFitJudgment = $derived(analysisModalMatch ? getActiveOpportunityFitJudgment(analysisModalMatch) : null);
   const analysisModalError = $derived(analysisModalMatch ? getOpportunityAnalysisError(analysisModalMatch) : '');
   const analysisModalLoading = $derived(analysisModalMatch ? isOpportunityAnalysisLoading(analysisModalMatch) : false);
+  const comparisonMatches = $derived(
+    comparisonRefs
+      .map((ref) => benefitMatches.find((match) => getCompareRef(match) === ref) ?? null)
+      .filter((match): match is BenefitMatch => match !== null)
+  );
+  const comparisonReady = $derived(comparisonMatches.length === 2);
 
   function createInitialData(): PersonaData {
     const filters = readClientFilters();
@@ -1356,6 +1365,50 @@
       : [...savedOpportunityRefs, ref];
   }
 
+  function toggleOpportunityComparison(match: BenefitMatch | null) {
+    if (!match) {
+      return;
+    }
+
+    const ref = getCompareRef(match);
+
+    if (comparisonRefs.includes(ref)) {
+      comparisonRefs = comparisonRefs.filter((selectedRef) => selectedRef !== ref);
+      comparisonModalOpen = false;
+      return;
+    }
+
+    comparisonRefs = comparisonRefs.length >= 2 ? [comparisonRefs[1], ref] : [...comparisonRefs, ref];
+    comparisonModalOpen = comparisonRefs.length === 2;
+  }
+
+  function isOpportunitySelectedForComparison(match: BenefitMatch): boolean {
+    return comparisonRefs.includes(getCompareRef(match));
+  }
+
+  function getComparisonButtonLabel(match: BenefitMatch | null): string {
+    if (!match) {
+      return 'Compare';
+    }
+
+    return isOpportunitySelectedForComparison(match) ? 'Selected' : comparisonRefs.length >= 2 ? 'Replace' : 'Compare';
+  }
+
+  function clearComparison() {
+    comparisonRefs = [];
+    comparisonModalOpen = false;
+  }
+
+  function openComparisonModal() {
+    if (comparisonReady) {
+      comparisonModalOpen = true;
+    }
+  }
+
+  function closeComparisonModal() {
+    comparisonModalOpen = false;
+  }
+
   async function judgeVisibleOpportunityFits(matches: BenefitMatch[]) {
     if (!browser || matches.length === 0) {
       return;
@@ -1398,20 +1451,23 @@
       return;
     }
 
-    const key = getOpportunityAnalysisKey(match);
-    if (opportunityAnalysisLoading[key]) {
+    const loadingKey = getOpportunityAnalysisLoadingKey(match);
+    if (opportunityAnalysisLoading[loadingKey]) {
       return;
     }
 
-    opportunityAnalysisLoading = { ...opportunityAnalysisLoading, [key]: true };
-    opportunityAnalysisErrors = { ...opportunityAnalysisErrors, [key]: '' };
+    opportunityAnalysisLoading = { ...opportunityAnalysisLoading, [loadingKey]: true };
+    opportunityAnalysisErrors = { ...opportunityAnalysisErrors, [loadingKey]: '' };
 
     try {
+      const fitJudgment = await ensureOpportunityFitJudgment(match);
+      const key = getOpportunityAnalysisKey(match, fitJudgment);
       const analysis = await fetchOpportunityAnalysis({
         backendApiUrl: getBackendApiUrl(data.innovation.endpoint),
         profile: persona,
         match,
         description: getOpportunityDescription(match),
+        fitJudgment,
         forceRefresh
       });
 
@@ -1419,10 +1475,45 @@
     } catch (error) {
       opportunityAnalysisErrors = {
         ...opportunityAnalysisErrors,
-        [key]: error instanceof Error ? error.message : 'Could not analyze this opportunity.'
+        [loadingKey]: error instanceof Error ? error.message : 'Could not analyze this opportunity.'
       };
     } finally {
-      opportunityAnalysisLoading = { ...opportunityAnalysisLoading, [key]: false };
+      opportunityAnalysisLoading = { ...opportunityAnalysisLoading, [loadingKey]: false };
+    }
+  }
+
+  async function ensureOpportunityFitJudgment(match: BenefitMatch): Promise<OpportunityFitJudgment | null> {
+    const existing = getOpportunityFitJudgment(match);
+    if ((existing && opportunityFitFilterAvailable) || !browser) {
+      return existing;
+    }
+    if (existing && opportunityFitFilterMessage) {
+      return null;
+    }
+
+    try {
+      const description = getOpportunityDescription(match);
+      const result = await fetchOpportunityFitJudgments({
+        backendApiUrl: getBackendApiUrl(data.innovation.endpoint),
+        profile: persona,
+        matches: [match],
+        descriptions: {
+          [getBenefitMatchRef(match) ?? getOpportunityTitle(match)]: description
+        }
+      });
+
+      opportunityFitJudgments = {
+        ...opportunityFitJudgments,
+        ...result.judgments
+      };
+      opportunityFitFilterAvailable = opportunityFitFilterAvailable || result.filter_available;
+      if (!result.filter_available && !opportunityFitFilterAvailable) {
+        opportunityFitFilterMessage = result.unavailable_reason ?? 'LLM fit filtering is unavailable.';
+      }
+
+      return result.filter_available ? result.judgments[getOpportunityFitJudgmentKey(match)] ?? null : null;
+    } catch {
+      return null;
     }
   }
 
@@ -1445,8 +1536,16 @@
   }
 
   function handleAnalysisModalKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && analysisModalMatch) {
+    if (event.key !== 'Escape') {
+      return;
+    }
+
+    if (analysisModalMatch) {
       closeOpportunityAnalysisModal();
+    }
+
+    if (comparisonModalOpen) {
+      closeComparisonModal();
     }
   }
 
@@ -1456,12 +1555,22 @@
     }
   }
 
+  function handleComparisonBackdropClick(event: MouseEvent) {
+    if (event.target === event.currentTarget) {
+      closeComparisonModal();
+    }
+  }
+
   function getOpportunityFitJudgmentKey(match: BenefitMatch): string {
     return getOpportunityFitJudgmentCacheKey(persona, match, getOpportunityDescription(match));
   }
 
   function getOpportunityFitJudgment(match: BenefitMatch): OpportunityFitJudgment | null {
     return opportunityFitJudgments[getOpportunityFitJudgmentKey(match)] ?? null;
+  }
+
+  function getActiveOpportunityFitJudgment(match: BenefitMatch): OpportunityFitJudgment | null {
+    return opportunityFitFilterAvailable ? getOpportunityFitJudgment(match) : null;
   }
 
   function isLlmExcludedOpportunity(match: BenefitMatch): boolean {
@@ -1503,8 +1612,39 @@
     return 'rounded-full bg-[#e8eef7] px-2.5 py-1.5 text-xs leading-none font-black text-[#38485d] uppercase';
   }
 
-  function getOpportunityAnalysisKey(match: BenefitMatch): string {
-    return getOpportunityAnalysisCacheKey(persona, match, getOpportunityDescription(match));
+  function getAnalysisFitBadgeLabel(fit: OpportunityAnalysis['fit']): string {
+    if (fit === 'strong') {
+      return 'LLM strong fit';
+    }
+
+    if (fit === 'weak') {
+      return 'LLM excluded';
+    }
+
+    return 'LLM possible fit';
+  }
+
+  function getAnalysisFitBadgeClass(fit: OpportunityAnalysis['fit']): string {
+    if (fit === 'strong') {
+      return 'rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-black text-emerald-800 uppercase';
+    }
+
+    if (fit === 'weak') {
+      return 'rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-black text-red-700 uppercase';
+    }
+
+    return 'rounded-full bg-[#e8eef7] px-2.5 py-1 text-[11px] font-black text-[#38485d] uppercase';
+  }
+
+  function getOpportunityAnalysisKey(
+    match: BenefitMatch,
+    fitJudgment: OpportunityFitJudgment | null = getActiveOpportunityFitJudgment(match)
+  ): string {
+    return getOpportunityAnalysisCacheKey(persona, match, getOpportunityDescription(match), fitJudgment);
+  }
+
+  function getOpportunityAnalysisLoadingKey(match: BenefitMatch): string {
+    return getOpportunityFitJudgmentKey(match);
   }
 
   function getOpportunityAnalysis(match: BenefitMatch): OpportunityAnalysis | null {
@@ -1512,11 +1652,11 @@
   }
 
   function isOpportunityAnalysisLoading(match: BenefitMatch): boolean {
-    return opportunityAnalysisLoading[getOpportunityAnalysisKey(match)] === true;
+    return opportunityAnalysisLoading[getOpportunityAnalysisLoadingKey(match)] === true;
   }
 
   function getOpportunityAnalysisError(match: BenefitMatch): string {
-    return opportunityAnalysisErrors[getOpportunityAnalysisKey(match)] ?? '';
+    return opportunityAnalysisErrors[getOpportunityAnalysisLoadingKey(match)] ?? '';
   }
 
   function getOpportunityAnalysisButtonLabel(match: BenefitMatch): string {
@@ -1581,7 +1721,7 @@
 
   function getBackendApiUrl(endpoint: string | null): string {
     try {
-      return endpoint ? new URL(endpoint).origin : DEFAULT_BACKEND_API_URL;
+      return endpoint ? new URL(endpoint, window.location.origin).origin : DEFAULT_BACKEND_API_URL;
     } catch {
       return DEFAULT_BACKEND_API_URL;
     }
@@ -1600,6 +1740,10 @@
     }
 
     return `title:${getOpportunityTitle(match)}|${getOpportunitySponsor(match)}`;
+  }
+
+  function getCompareRef(match: BenefitMatch): string {
+    return getBenefitMatchRef(match) ?? `match:${getOpportunityTitle(match)}|${getOpportunitySponsor(match)}`;
   }
 
   function getOpportunityTitle(match: BenefitMatch): string {
@@ -1644,6 +1788,42 @@
 
   function getFundingSourceLabel(match: BenefitMatch): string {
     return match.amount !== null ? 'Published amount' : match.estimatedAmount !== null ? 'Historical median estimate' : 'Not available';
+  }
+
+  function getComparisonMetricClass(value: number | null, peerValue: number | null): string {
+    if (value === null || peerValue === null || value === peerValue) {
+      return 'rounded-lg border border-slate-200 bg-[#f2f4f6] p-3';
+    }
+
+    return value > peerValue
+      ? 'rounded-lg border border-emerald-200 bg-emerald-50 p-3'
+      : 'rounded-lg border border-slate-200 bg-white p-3';
+  }
+
+  function getComparisonSummary(left: BenefitMatch, right: BenefitMatch): string {
+    const scoreDifference = left.matchScore - right.matchScore;
+    const fundingDifference = (left.potentialFunding ?? 0) - (right.potentialFunding ?? 0);
+
+    if (Math.abs(scoreDifference) >= 8) {
+      const stronger = scoreDifference > 0 ? left : right;
+      return `${getOpportunityTitle(stronger)} has the stronger profile fit based on the current match score.`;
+    }
+
+    if (Math.abs(fundingDifference) > 0) {
+      const larger = fundingDifference > 0 ? left : right;
+      return `${getOpportunityTitle(larger)} has the larger funding signal, while both opportunities remain close on fit.`;
+    }
+
+    return 'These opportunities are close. Use risks, deadline, and application effort to decide which one to pursue first.';
+  }
+
+  function getComparisonFitLabel(match: BenefitMatch): string {
+    const judgment = getActiveOpportunityFitJudgment(match);
+    if (judgment) {
+      return judgment.fit === 'weak' ? 'LLM excluded' : judgment.fit === 'strong' ? 'LLM strong fit' : 'LLM possible fit';
+    }
+
+    return match.statusLabel;
   }
 
   function getDeadlineLabel(match: BenefitMatch): string {
@@ -1745,12 +1925,23 @@
 
 <svelte:window onkeydown={handleAnalysisModalKeydown} />
 
-{#snippet opportunityAnalysisPanel(analysis: OpportunityAnalysis)}
+{#snippet opportunityAnalysisPanel(analysis: OpportunityAnalysis, fitJudgment: OpportunityFitJudgment | null)}
   <section class="rounded-lg border border-emerald-100 bg-emerald-50/80 p-4 text-sm text-[#25302a]" aria-label="Opportunity fit analysis">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <p class="m-0 text-xs font-black tracking-normal text-emerald-700 uppercase">Fit analysis</p>
-      <span class="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-[#45464d] uppercase">{analysis.confidence} confidence</span>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class={getAnalysisFitBadgeClass(analysis.fit)}>
+          {getAnalysisFitBadgeLabel(analysis.fit)}
+        </span>
+        <span class="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-[#45464d] uppercase">{analysis.confidence} confidence</span>
+      </div>
     </div>
+    {#if fitJudgment}
+      <p class="m-0 mt-2 rounded-md border border-white bg-white/70 px-3 py-2 leading-5 text-[#45464d]">
+        Filter verdict: {fitJudgment.should_show ? 'visible in ranked matches' : 'hidden unless LLM-excluded matches are shown'}.
+        {fitJudgment.reason}
+      </p>
+    {/if}
     <p class="m-0 mt-2 leading-6 text-[#25302a]">{analysis.fit_summary}</p>
 
     <div class="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
@@ -1774,6 +1965,54 @@
       </ul>
     </div>
   {/if}
+{/snippet}
+
+{#snippet comparisonOpportunityPanel(match: BenefitMatch, peer: BenefitMatch)}
+  <section class="grid gap-4 rounded-lg border border-slate-200 bg-white p-4">
+    <header class="grid gap-2">
+      <div class="flex flex-wrap gap-1.5">
+        {#each getOpportunityTags(match).slice(0, 3) as tag (tag)}
+          <span class="rounded-full bg-[#eceef0] px-2.5 py-1.5 text-xs leading-none font-black text-[#45464d] uppercase first:bg-[#131b2e] first:text-[#dae2fd]">{tag}</span>
+        {/each}
+        {#if getActiveOpportunityFitJudgment(match)}
+          <span class={getAnalysisFitBadgeClass(getActiveOpportunityFitJudgment(match)?.fit ?? 'possible')}>
+            {getComparisonFitLabel(match)}
+          </span>
+        {/if}
+      </div>
+      <h3 class="m-0 text-xl leading-tight text-[#191c1e]">{getOpportunityTitle(match)}</h3>
+      <p class="m-0 text-sm font-black text-[#006c49] uppercase">{getOpportunitySponsor(match)}</p>
+    </header>
+
+    <div class="grid grid-cols-2 gap-3 max-[640px]:grid-cols-1">
+      <div class={getComparisonMetricClass(match.matchScore, peer.matchScore)}>
+        <span class="text-[11px] font-black text-[#45464d] uppercase">Match</span>
+        <strong class="mt-1 block text-2xl text-[#006c49]">{match.matchScore}%</strong>
+        <small class="text-xs text-[#45464d]">{getComparisonFitLabel(match)}</small>
+      </div>
+      <div class={getComparisonMetricClass(match.potentialFunding, peer.potentialFunding)}>
+        <span class="text-[11px] font-black text-[#45464d] uppercase">Funding</span>
+        <strong class="mt-1 block text-lg text-[#191c1e]">{getFundingLabel(match)}</strong>
+        <small class="text-xs text-[#45464d]">{getFundingSourceLabel(match)}</small>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-[#f2f4f6] p-3">
+        <span class="text-[11px] font-black text-[#45464d] uppercase">Deadline</span>
+        <strong class="mt-1 block text-lg text-[#191c1e]">{getDeadlineLabel(match)}</strong>
+      </div>
+      <div class={getComparisonMetricClass(match.historicalEvidenceCount, peer.historicalEvidenceCount)}>
+        <span class="text-[11px] font-black text-[#45464d] uppercase">Historical signals</span>
+        <strong class="mt-1 block text-lg text-[#191c1e]">{match.historicalEvidenceCount}</strong>
+      </div>
+    </div>
+
+    <p class="m-0 text-sm leading-6 text-[#45464d]">{getOpportunityDescription(match)}</p>
+
+    <div class="grid gap-3">
+      {@render analysisList('Why it matches', match.reasons)}
+      {@render analysisList('Risks', match.risks)}
+      {@render analysisList('Next actions', match.nextActions)}
+    </div>
+  </section>
 {/snippet}
 
 <div class={pageShellClass}>
@@ -1870,6 +2109,28 @@
             {/if}
           </div>
 
+          {#if comparisonRefs.length > 0}
+            <section class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950" aria-label="Opportunity comparison selection">
+              <div class="min-w-0">
+                <p class="m-0 text-xs font-black tracking-normal text-emerald-700 uppercase">Compare opportunities</p>
+                <p class="m-0 mt-1 leading-6">
+                  {comparisonRefs.length}/2 selected
+                  {#if comparisonMatches.length > 0}
+                    : {comparisonMatches.map(getOpportunityTitle).join(' vs ')}
+                  {/if}
+                </p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button class={compactButtonClass} disabled={!comparisonReady} type="button" onclick={openComparisonModal}>
+                  Open comparison
+                </button>
+                <button class={compactButtonClass} type="button" onclick={clearComparison}>
+                  Clear
+                </button>
+              </div>
+            </section>
+          {/if}
+
           {#if newLikelyOpportunityCount > 0}
             <section class="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950" role="status">
               <h3 class="m-0 font-bold">New likely opportunities found</h3>
@@ -1922,6 +2183,7 @@
               {#if topOpportunity}
                 {@const topOpportunityRef = getOpportunityRef(topOpportunity.record)}
                 {@const topOpportunitySaved = topOpportunityRef ? savedOpportunityRefSet.has(topOpportunityRef) : false}
+                {@const topOpportunityCompared = isOpportunitySelectedForComparison(topOpportunity)}
                 {@const topOpportunityAnalysisLoading = isOpportunityAnalysisLoading(topOpportunity)}
                 <article class={`col-span-8 grid min-h-[360px] grid-cols-[minmax(0,1fr)_260px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_4px_20px_rgba(0,0,0,0.03)] max-[1080px]:col-span-full max-[1080px]:grid-cols-[minmax(0,1fr)_230px] max-[760px]:grid-cols-1 ${isLlmExcludedOpportunity(topOpportunity) ? 'opacity-75' : ''}`}>
                   <div class="grid gap-4 p-7">
@@ -1952,6 +2214,14 @@
                           onclick={() => openOpportunityAnalysisModal(topOpportunity)}
                         >
                           {getOpportunityAnalysisButtonLabel(topOpportunity)}
+                        </button>
+                        <button
+                          aria-pressed={topOpportunityCompared}
+                          class={`${secondaryButtonClass} ${topOpportunityCompared ? 'border-emerald-700 bg-emerald-50 text-emerald-800' : ''}`}
+                          type="button"
+                          onclick={() => toggleOpportunityComparison(topOpportunity)}
+                        >
+                          {getComparisonButtonLabel(topOpportunity)}
                         </button>
                         <button
                           aria-pressed={topOpportunitySaved}
@@ -2018,6 +2288,7 @@
               {#each remainingOpportunities as match, index (getOpportunityRef(match.record) ?? `opportunity-${index}`)}
                 {@const opportunityRef = getOpportunityRef(match.record)}
                 {@const opportunitySaved = opportunityRef ? savedOpportunityRefSet.has(opportunityRef) : false}
+                {@const opportunityCompared = isOpportunitySelectedForComparison(match)}
                 {@const opportunityAnalysisLoading = isOpportunityAnalysisLoading(match)}
                 <article class={`col-span-4 grid min-h-80 gap-4 rounded-lg border border-slate-200 bg-white p-6 ${cardShadowClass} transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] max-[1080px]:col-span-full ${isLlmExcludedOpportunity(match) ? 'opacity-75' : ''}`}>
                   <div class="flex items-start justify-between gap-4">
@@ -2061,7 +2332,7 @@
                     </div>
                   </div>
 
-                  <div class="grid grid-cols-2 gap-2 max-[480px]:grid-cols-1">
+                  <div class="grid grid-cols-3 gap-2 max-[760px]:grid-cols-1">
                     <button
                       aria-busy={opportunityAnalysisLoading}
                       class={`${secondaryButtonClass} ${opportunityAnalysisLoading ? 'cursor-wait opacity-80' : ''}`}
@@ -2069,6 +2340,14 @@
                       onclick={() => openOpportunityAnalysisModal(match)}
                     >
                       {getOpportunityAnalysisButtonLabel(match)}
+                    </button>
+                    <button
+                      aria-pressed={opportunityCompared}
+                      class={`${secondaryButtonClass} ${opportunityCompared ? 'border-emerald-700 bg-emerald-50 text-emerald-800' : ''}`}
+                      type="button"
+                      onclick={() => toggleOpportunityComparison(match)}
+                    >
+                      {getComparisonButtonLabel(match)}
                     </button>
                     <button
                       aria-pressed={opportunitySaved}
@@ -2144,7 +2423,14 @@
                         <strong class="text-sm text-[#191c1e]">{item.match.matchScore}%</strong>
                         <small class="text-xs text-[#45464d]">{item.match.statusLabel}</small>
                       </div>
-                      <div>
+                      <div class="flex flex-wrap gap-2">
+                        <button
+                          class={compactButtonClass}
+                          type="button"
+                          onclick={() => toggleOpportunityComparison(item.match)}
+                        >
+                          {getComparisonButtonLabel(item.match)}
+                        </button>
                         <button
                           class={compactButtonClass}
                           type="button"
@@ -2248,7 +2534,7 @@
         {/if}
 
         {#if analysisModalAnalysis}
-          {@render opportunityAnalysisPanel(analysisModalAnalysis)}
+          {@render opportunityAnalysisPanel(analysisModalAnalysis, analysisModalFitJudgment)}
         {:else if analysisModalError}
           <section class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-800" role="alert">
             {analysisModalError}
@@ -2271,6 +2557,56 @@
           onclick={refreshOpportunityAnalysisModal}
         >
           {analysisModalAnalysis ? 'Refresh analysis' : analysisModalError ? 'Retry analysis' : 'Analyze fit'}
+        </button>
+      </footer>
+    </div>
+  </div>
+{/if}
+
+{#if comparisonModalOpen && comparisonReady}
+  {@const leftComparisonMatch = comparisonMatches[0]}
+  {@const rightComparisonMatch = comparisonMatches[1]}
+  <div
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-[#0b1c30]/60 p-4 backdrop-blur-sm"
+    role="presentation"
+    onclick={handleComparisonBackdropClick}
+  >
+    <div
+      aria-labelledby="opportunity-comparison-title"
+      aria-modal="true"
+      class="grid max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-xl border border-slate-200 bg-[#f7f9fb] shadow-[0_24px_80px_rgba(0,0,0,0.24)]"
+      role="dialog"
+    >
+      <header class="flex items-start justify-between gap-4 border-b border-slate-200 bg-white p-5">
+        <div class="min-w-0">
+          <p class={eyebrowClass}>Opportunity comparison</p>
+          <h2 id="opportunity-comparison-title" class="m-0 text-2xl leading-tight text-[#191c1e]">Compare two matches</h2>
+          <p class="m-0 mt-1 text-sm leading-6 text-[#45464d]">{getComparisonSummary(leftComparisonMatch, rightComparisonMatch)}</p>
+        </div>
+
+        <button
+          aria-label="Close opportunity comparison"
+          class="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white leading-none text-[#191c1e] hover:bg-slate-100"
+          type="button"
+          onclick={closeComparisonModal}
+        >
+          <span class="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
+        </button>
+      </header>
+
+      <div class="grid gap-5 overflow-y-auto p-5">
+        <div class="grid grid-cols-2 gap-5 max-[900px]:grid-cols-1">
+          {@render comparisonOpportunityPanel(leftComparisonMatch, rightComparisonMatch)}
+          {@render comparisonOpportunityPanel(rightComparisonMatch, leftComparisonMatch)}
+        </div>
+      </div>
+
+      <footer class="flex flex-wrap justify-between gap-2 border-t border-slate-200 bg-white p-5">
+        <button class={secondaryButtonClass} type="button" onclick={clearComparison}>
+          Clear comparison
+        </button>
+        <button class={secondaryButtonClass} type="button" onclick={closeComparisonModal}>
+          Close
         </button>
       </footer>
     </div>

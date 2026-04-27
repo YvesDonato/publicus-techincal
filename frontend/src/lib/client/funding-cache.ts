@@ -134,13 +134,26 @@ function clampCount(value: number): number {
   return Math.max(1, Math.min(5000, Math.floor(value)));
 }
 
+function endpointUrl(endpoint: string): URL {
+  const base = typeof window === 'undefined' ? 'http://localhost' : window.location.origin;
+  return new URL(endpoint, base);
+}
+
+function isAbsoluteEndpoint(endpoint: string): boolean {
+  return /^[a-z][a-z\d+.-]*:/i.test(endpoint);
+}
+
+function serializeEndpoint(url: URL, originalEndpoint: string): string {
+  return isAbsoluteEndpoint(originalEndpoint) ? url.toString() : `${url.pathname}${url.search}${url.hash}`;
+}
+
 function updateGrantsEndpoint(endpoint: string, limit: number, offset: number): string {
   try {
-    const url = new URL(endpoint);
+    const url = endpointUrl(endpoint);
     url.searchParams.set('limit', String(limit));
     url.searchParams.set('offset', String(offset));
     url.searchParams.set('include_total', 'true');
-    return url.toString();
+    return serializeEndpoint(url, endpoint);
   } catch {
     return endpoint;
   }
@@ -148,7 +161,7 @@ function updateGrantsEndpoint(endpoint: string, limit: number, offset: number): 
 
 function updateBenefitsEndpoint(endpoint: string, count: number): string {
   try {
-    const url = new URL(endpoint);
+    const url = endpointUrl(endpoint);
     const segments = url.pathname.split('/');
     const firstIndex = segments.lastIndexOf('first');
 
@@ -159,7 +172,7 @@ function updateBenefitsEndpoint(endpoint: string, count: number): string {
       url.searchParams.set('limit', String(count));
     }
 
-    return url.toString();
+    return serializeEndpoint(url, endpoint);
   } catch {
     return endpoint;
   }
@@ -167,7 +180,7 @@ function updateBenefitsEndpoint(endpoint: string, count: number): string {
 
 function buildPipelineEndpoint(endpoint: string, source: PipelineSource, requested: number, offset = 0): string | null {
   try {
-    const url = new URL(endpoint);
+    const url = endpointUrl(endpoint);
     const params = new URLSearchParams({
       source,
       limit: String(clampCount(requested)),
@@ -178,7 +191,8 @@ function buildPipelineEndpoint(endpoint: string, source: PipelineSource, request
       params.set('active', 'true');
     }
 
-    return `${url.origin}/api/pipeline/records?${params.toString()}`;
+    const origin = isAbsoluteEndpoint(endpoint) ? url.origin : '';
+    return `${origin}/api/pipeline/records?${params.toString()}`;
   } catch {
     return null;
   }
@@ -186,7 +200,7 @@ function buildPipelineEndpoint(endpoint: string, source: PipelineSource, request
 
 function readEndpointInteger(endpoint: string, key: string, fallback: number): number {
   try {
-    const value = new URL(endpoint).searchParams.get(key);
+    const value = endpointUrl(endpoint).searchParams.get(key);
     const parsed = value ? Number(value) : NaN;
     return Number.isInteger(parsed) ? parsed : fallback;
   } catch {

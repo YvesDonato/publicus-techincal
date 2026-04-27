@@ -22,6 +22,7 @@ def analyze_opportunity_match(request: OpportunityAnalysisRequest) -> dict[str, 
             profile=request.profile,
             opportunity=request.opportunity,
             match=request.match,
+            fit_judgment=request.fit_judgment,
             timeout=request.timeout,
         )
     except OpportunityAnalysisUnavailable as exc:

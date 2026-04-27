@@ -26,14 +26,29 @@ class OpportunityMatchContext(BaseModel):
     next_actions: list[str] = Field(default_factory=list, max_length=12)
 
 
+class OpportunityFitJudgment(BaseModel):
+    record_ref: str
+    fit: OpportunityFit
+    should_show: bool
+    confidence: AnalysisConfidence
+    reason: str
+    risk_notes: list[str]
+
+
 class OpportunityAnalysisRequest(BaseModel):
     profile: dict[str, Any] = Field(description="Company profile used to score the opportunity.")
     opportunity: dict[str, Any] = Field(description="Raw active opportunity record.")
     match: OpportunityMatchContext
+    fit_judgment: OpportunityFitJudgment | None = Field(
+        default=None,
+        description="Optional LLM fit-filter judgment that detailed analysis must respect.",
+    )
     timeout: float = Field(default=30.0, ge=5.0, le=120.0)
 
 
 class OpportunityAnalysisResponse(BaseModel):
+    fit: OpportunityFit
+    should_show: bool
     fit_summary: str
     eligibility_flags: list[str]
     missing_company_info: list[str]
@@ -54,15 +69,6 @@ class OpportunityFitJudgeRequest(BaseModel):
     profile: dict[str, Any] = Field(description="Company profile used to judge the opportunity fit.")
     opportunities: list[OpportunityFitJudgeCandidate] = Field(default_factory=list, max_length=20)
     timeout: float = Field(default=30.0, ge=5.0, le=120.0)
-
-
-class OpportunityFitJudgment(BaseModel):
-    record_ref: str
-    fit: OpportunityFit
-    should_show: bool
-    confidence: AnalysisConfidence
-    reason: str
-    risk_notes: list[str]
 
 
 class OpportunityFitJudgeResponse(BaseModel):

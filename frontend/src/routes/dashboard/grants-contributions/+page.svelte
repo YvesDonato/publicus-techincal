@@ -425,9 +425,9 @@
 
   function getBackendApiUrl(endpoint: string): string {
     try {
-      return new URL(endpoint).origin;
+      return new URL(endpoint, window.location.origin).origin;
     } catch {
-      return 'http://127.0.0.1:8000';
+      return '';
     }
   }
 

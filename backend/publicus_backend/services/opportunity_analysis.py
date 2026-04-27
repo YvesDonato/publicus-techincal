@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from publicus_backend.schemas.opportunity_analysis import OpportunityFitJudgeCandidate, OpportunityMatchContext
+from publicus_backend.schemas.opportunity_analysis import OpportunityFitJudgeCandidate, OpportunityFitJudgment, OpportunityMatchContext
 
 
 class OpportunityAnalysisUnavailable(RuntimeError):
@@ -58,6 +58,7 @@ def analyze_opportunity(
     profile: dict[str, Any],
     opportunity: dict[str, Any],
     match: OpportunityMatchContext,
+    fit_judgment: OpportunityFitJudgment | None = None,
     timeout: float,
 ) -> dict[str, Any]:
     api_key = google_api_key()
@@ -65,29 +66,36 @@ def analyze_opportunity(
         return build_local_analysis(
             profile=profile,
             match=match,
-            unavailable_reason="Gemini is not configured, so FundRadar used the scored match signals."
+            fit_judgment=fit_judgment,
+            unavailable_reason="Gemini is not configured, so FundRadar used the scored match signals.",
         )
 
     try:
         payload = call_gemini_opportunity_analysis(
-            prompt=build_opportunity_prompt(profile=profile, opportunity=opportunity, match=match),
+            prompt=build_opportunity_prompt(
+                profile=profile,
+                opportunity=opportunity,
+                match=match,
+                fit_judgment=fit_judgment,
+            ),
             api_key=api_key,
             timeout=timeout,
         )
         parsed = parse_gemini_json(payload)
-        normalized = normalize_analysis_payload(parsed)
+        normalized = normalize_analysis_payload(parsed, match=match, fit_judgment=fit_judgment)
         normalized["provider"] = "google"
         return normalized
     except (OpportunityAnalysisUnavailable, httpx.HTTPError) as exc:
         return build_local_analysis(
             profile=profile,
             match=match,
+            fit_judgment=fit_judgment,
             unavailable_reason=get_gemini_unavailable_reason(exc),
         )
 
 
 def call_gemini_opportunity_analysis(*, prompt: str, api_key: str, timeout: float) -> dict[str, Any]:
-    model = os.getenv("PUBLICUS_GEMINI_GENERATION_MODEL", "gemini-2.0-flash")
+    model = os.getenv("PUBLICUS_GEMINI_GENERATION_MODEL", "gemini-3-flash-preview")
     model_path = model if model.startswith("models/") else f"models/{model}"
     url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent"
     request = {
@@ -301,6 +309,7 @@ def build_local_analysis(
     *,
     profile: dict[str, Any],
     match: OpportunityMatchContext,
+    fit_judgment: OpportunityFitJudgment | None,
     unavailable_reason: str,
 ) -> dict[str, Any]:
     title = normalize_string(match.title, "this opportunity", max_length=180)
@@ -341,6 +350,7 @@ def build_local_analysis(
     )
     risk_notes = list_from_candidates(
         [
+            *(fit_judgment.risk_notes[:2] if fit_judgment else []),
             *match.risks[:4],
             unavailable_reason,
         ],
@@ -349,13 +359,15 @@ def build_local_analysis(
     )
 
     return {
+        "fit": fit_judgment.fit if fit_judgment else fit_from_score(match.match_score),
+        "should_show": fit_judgment.should_show if fit_judgment else match.match_score >= 45,
         "fit_summary": " ".join(summary_parts)[:520],
         "eligibility_flags": eligibility_flags,
         "missing_company_info": missing,
         "application_steps": application_steps,
         "risk_notes": risk_notes,
         "questions_to_answer": build_local_questions(match),
-        "confidence": confidence_from_score(match.match_score),
+        "confidence": fit_judgment.confidence if fit_judgment else confidence_from_score(match.match_score),
         "provider": "local-fallback",
     }
 
@@ -412,8 +424,24 @@ def confidence_from_score(score: float) -> str:
     return "low"
 
 
-def build_opportunity_prompt(*, profile: dict[str, Any], opportunity: dict[str, Any], match: OpportunityMatchContext) -> str:
+def fit_from_score(score: float) -> str:
+    if score >= 78:
+        return "strong"
+    if score >= 45:
+        return "possible"
+    return "weak"
+
+
+def build_opportunity_prompt(
+    *,
+    profile: dict[str, Any],
+    opportunity: dict[str, Any],
+    match: OpportunityMatchContext,
+    fit_judgment: OpportunityFitJudgment | None,
+) -> str:
     schema = {
+        "fit": "strong | possible | weak",
+        "should_show": "boolean",
         "fit_summary": "2 concise sentences explaining the match using only provided evidence",
         "eligibility_flags": ["eligibility signals to verify"],
         "missing_company_info": ["company facts needed before applying"],
@@ -437,16 +465,30 @@ def build_opportunity_prompt(*, profile: dict[str, Any], opportunity: dict[str, 
         "risks": match.risks,
         "next_actions": match.next_actions,
     }
+    judgment_context = (
+        {
+            "fit": fit_judgment.fit,
+            "should_show": fit_judgment.should_show,
+            "confidence": fit_judgment.confidence,
+            "reason": fit_judgment.reason,
+            "risk_notes": fit_judgment.risk_notes,
+        }
+        if fit_judgment
+        else None
+    )
 
     return (
         "You are FundRadar's Canadian funding analyst. Explain one active funding opportunity against one company profile.\n"
         "Use only the supplied profile, opportunity record, and match context. Do not invent eligibility, deadlines, funding amounts, "
         "or application requirements. Do not say the company is definitely eligible. If source evidence is weak or missing, put that "
         "in missing_company_info, risk_notes, or questions_to_answer.\n"
+        "If an LLM fit-filter judgment is supplied, your fit, should_show, confidence, summary, and risks must respect that judgment. "
+        "Do not upgrade a weak/excluded filter judgment in the detailed analysis.\n"
         "Return only valid JSON matching the response shape. Keep every list item short and actionable.\n\n"
         f"Response shape:\n{json.dumps(schema, ensure_ascii=False)}\n\n"
         f"Company profile:\n{compact_json(profile)}\n\n"
         f"Match context:\n{compact_json(context)}\n\n"
+        f"LLM fit-filter judgment:\n{compact_json(judgment_context)}\n\n"
         f"Raw active opportunity record:\n{compact_json(opportunity)}"
     )
 
@@ -476,23 +518,58 @@ def parse_gemini_json(payload: dict[str, Any]) -> dict[str, Any]:
     return parsed
 
 
-def normalize_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def normalize_analysis_payload(
+    payload: dict[str, Any],
+    *,
+    match: OpportunityMatchContext | None = None,
+    fit_judgment: OpportunityFitJudgment | None = None,
+) -> dict[str, Any]:
     analysis = payload.get("analysis") if isinstance(payload.get("analysis"), dict) else payload
     if not isinstance(analysis, dict):
         analysis = {}
 
+    score = match.match_score if match else 50
+    fit = fit_judgment.fit if fit_judgment else normalize_fit(analysis.get("fit"), score)
+    should_show_raw = analysis.get("should_show")
+    if fit_judgment:
+        should_show = fit_judgment.should_show
+    elif isinstance(should_show_raw, bool):
+        should_show = should_show_raw
+    else:
+        should_show = fit != "weak"
+    confidence = fit_judgment.confidence if fit_judgment else normalize_confidence(analysis.get("confidence"))
+    fit_summary = normalize_string(
+        analysis.get("fit_summary"),
+        "Review this opportunity against the company profile and confirm eligibility details on the official program page.",
+        max_length=520,
+    )
+
+    if fit_judgment:
+        filter_summary = (
+            f"LLM fit filter rated this as {fit_judgment.fit} "
+            f"and {'kept it visible' if fit_judgment.should_show else 'excluded it from default results'} "
+            f"because {fit_judgment.reason}"
+        )
+        fit_summary = normalize_string(f"{filter_summary}. {fit_summary}", filter_summary, max_length=520)
+
+    risk_notes = normalize_string_list(analysis.get("risk_notes"), max_items=6, max_length=180)
+    if fit_judgment:
+        risk_notes = list_from_candidates(
+            [fit_judgment.reason, *fit_judgment.risk_notes, *risk_notes],
+            fallback=risk_notes or [fit_judgment.reason],
+            max_items=6,
+        )
+
     return {
-        "fit_summary": normalize_string(
-            analysis.get("fit_summary"),
-            "Review this opportunity against the company profile and confirm eligibility details on the official program page.",
-            max_length=520,
-        ),
+        "fit": fit,
+        "should_show": should_show,
+        "fit_summary": fit_summary,
         "eligibility_flags": normalize_string_list(analysis.get("eligibility_flags"), max_items=6, max_length=180),
         "missing_company_info": normalize_string_list(analysis.get("missing_company_info"), max_items=6, max_length=180),
         "application_steps": normalize_string_list(analysis.get("application_steps"), max_items=6, max_length=180),
-        "risk_notes": normalize_string_list(analysis.get("risk_notes"), max_items=6, max_length=180),
+        "risk_notes": risk_notes,
         "questions_to_answer": normalize_string_list(analysis.get("questions_to_answer"), max_items=6, max_length=180),
-        "confidence": normalize_confidence(analysis.get("confidence")),
+        "confidence": confidence,
     }
 
 

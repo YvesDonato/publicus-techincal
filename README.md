@@ -30,8 +30,12 @@ The app is currently optimized for authenticated funding discovery: users build 
 
 ```text
 .
+├── .dockerignore
 ├── .env.example
 ├── .envrc
+├── Dockerfile
+├── docker/
+│   └── start.sh
 ├── flake.nix
 ├── supabase/
 │   └── migrations/
@@ -114,7 +118,32 @@ Run the frontend:
 npm --prefix frontend run dev -- --host 0.0.0.0
 ```
 
-The frontend defaults to `http://127.0.0.1:8000` for FastAPI calls. Set `BACKEND_API_URL` if the backend runs somewhere else.
+The frontend uses same-origin `/api/...` URLs by default. In local development, SvelteKit proxies those requests to the FastAPI server at `http://127.0.0.1:8000`.
+
+## Docker and Coolify
+
+The repository includes a root `Dockerfile` for Coolify. It builds the SvelteKit app, installs the FastAPI backend dependencies, and runs both services in one container:
+
+- SvelteKit listens on `PORT`, default `3000`.
+- FastAPI listens internally on `127.0.0.1:${BACKEND_PORT}`, default `8000`.
+- Browser requests to `/api/...` are handled by SvelteKit and proxied to FastAPI through `INTERNAL_BACKEND_API_URL`.
+
+Coolify setup:
+
+1. Create a new application from the Git repository.
+2. Choose Dockerfile build mode and use the root `Dockerfile`.
+3. Expose port `3000`.
+4. Set the required environment variables from `.env.example`, especially Supabase auth values.
+5. Leave `PUBLIC_BACKEND_API_URL` empty unless the backend is deployed on a separate public domain.
+
+Local Docker build:
+
+```bash
+docker build -t fundradar .
+docker run --rm -p 3000:3000 --env-file .env fundradar
+```
+
+If you deploy the frontend and backend separately, set `PUBLIC_BACKEND_API_URL` to the public backend origin and `INTERNAL_BACKEND_API_URL` or `BACKEND_API_URL` to the internal FastAPI origin.
 
 ## Environment
 
@@ -137,7 +166,9 @@ PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 Common backend and pipeline variables:
 
 ```bash
+PUBLIC_BACKEND_API_URL=
 BACKEND_API_URL=http://127.0.0.1:8000
+INTERNAL_BACKEND_API_URL=http://127.0.0.1:8000
 PUBLICUS_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
@@ -153,7 +184,7 @@ PUBLICUS_GOOGLE_EMBEDDING_MODEL=gemini-embedding-001
 PUBLICUS_GOOGLE_EMBEDDING_BATCH_SIZE=100
 PUBLICUS_GOOGLE_EMBEDDING_TASK_TYPE=SEMANTIC_SIMILARITY
 GEMINI_API_KEY=
-PUBLICUS_GEMINI_GENERATION_MODEL=gemini-2.0-flash
+PUBLICUS_GEMINI_GENERATION_MODEL=gemini-3-flash-preview
 ```
 
 `GOOGLE_API_KEY` and `GOOGLE_GENERATIVE_AI_API_KEY` are also accepted by the backend. An OpenAI embedding fallback can be enabled with:
@@ -284,6 +315,37 @@ FundRadar has two read paths for funding data:
 2. Live fallback reads from the original public source APIs plus browser cache.
 
 This keeps the dashboard usable before the ingestion tables are configured, while giving production deployments a faster and more consistent storage path.
+
+```mermaid
+flowchart LR
+  grants["Open Canada\nGrants & Contributions"]
+  benefits["Innovation Canada\nBusiness Benefits Finder"]
+  ingest["FastAPI ingestion\n/api/pipeline/ingest/{source}"]
+  normalize["Normalize records\nsource_id, title, sponsor,\namount, dates, status, raw JSON"]
+  supabase["Supabase\nsource_records + ingestion_runs"]
+  live["Live fallback APIs\n/api/grants + /api/business-benefits"]
+  frontend["SvelteKit dashboard\nfunding-cache + localStorage"]
+  profile["Company profile\nSupabase profile data"]
+  rules["Rule scoring\nlocation, sector, activities,\nfunding need, historical signals"]
+  embeddings["Semantic scoring\nGemini embeddings + pgvector"]
+  llm["LLM fit layer\nGemini judge-fit + analyze"]
+  results["Opportunity Matches\nrank, filter, shortlist,\ngraph and analysis views"]
+
+  grants --> ingest
+  benefits --> ingest
+  ingest --> normalize
+  normalize --> supabase
+  supabase --> frontend
+  grants -. fallback .-> live
+  benefits -. fallback .-> live
+  live -. fallback .-> frontend
+  frontend --> rules
+  profile --> rules
+  rules --> embeddings
+  embeddings --> llm
+  llm --> results
+  rules --> results
+```
 
 ### Sources
 

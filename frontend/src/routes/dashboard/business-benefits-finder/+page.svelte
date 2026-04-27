@@ -90,7 +90,7 @@
   const MATCH_PAGE_SIZE = 50;
   const MATCH_LOAD_TIMEOUT_MS = 12000;
   const RECORD_SCAN_BATCH_SIZE = 500;
-  const DEFAULT_BACKEND_API_URL = 'http://127.0.0.1:8000';
+  const DEFAULT_BACKEND_API_URL = '';
   const LIKELY_BENEFIT_REFS_STORAGE_KEY = 'fundradar.businessBenefitsFinderLikelyRefs.v1';
   const titleFields = [
     'title',

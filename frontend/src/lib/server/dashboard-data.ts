@@ -54,7 +54,7 @@ type GrantQuery = {
   endpoint: string;
 };
 
-const DEFAULT_BACKEND_API_URL = 'http://127.0.0.1:8000';
+const DEFAULT_BACKEND_API_URL = '';
 const DEFAULT_COUNT = 10;
 const MAX_COUNT = 100;
 
@@ -236,7 +236,7 @@ function emptyInnovationResult(filters: DatasetFilters) {
 }
 
 export async function loadDashboardData(_fetch: typeof globalThis.fetch, url: URL) {
-  const backendApiUrl = (env.BACKEND_API_URL ?? DEFAULT_BACKEND_API_URL).replace(/\/$/, '');
+  const backendApiUrl = (env.PUBLIC_BACKEND_API_URL ?? DEFAULT_BACKEND_API_URL).replace(/\/$/, '');
   const filters = parseFilters(url);
   const grantQuery = buildGrantQuery(filters, backendApiUrl);
   const grantsResult =

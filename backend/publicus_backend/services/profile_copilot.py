@@ -96,7 +96,7 @@ def extract_company_profile(
 
 
 def call_gemini_profile_extraction(*, prompt: str, api_key: str, timeout: float) -> dict[str, Any]:
-    model = os.getenv("PUBLICUS_GEMINI_GENERATION_MODEL", "gemini-2.0-flash")
+    model = os.getenv("PUBLICUS_GEMINI_GENERATION_MODEL", "gemini-3-flash-preview")
     model_path = model if model.startswith("models/") else f"models/{model}"
     url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent"
     request = {

@@ -51,7 +51,7 @@
       error: string | null;
     };
   };
-  const DEFAULT_BACKEND_API_URL = 'http://127.0.0.1:8000';
+  const DEFAULT_BACKEND_API_URL = '';
   const DEFAULT_COUNT = 10;
   const MAX_COUNT = 100;
   const profileShellClass =
@@ -314,6 +314,7 @@
   let copilotGenerating = $state(false);
   let copilotError = $state('');
   let copilotApplied = $state(false);
+  let showCopilotModal = $state(false);
   let selectedYear = $state<string | null>(null);
   let selectedCount = $state<string | null>(null);
   let selectedSort = $state<SortMode | null>(null);
@@ -576,12 +577,6 @@
     };
   }
 
-  function resetPersona() {
-    persona = createDefaultPersona();
-    profileSaved = false;
-    profileSaveError = '';
-  }
-
   function clearPersona() {
     persona = createEmptyPersona();
     likelyOnly = false;
@@ -598,6 +593,26 @@
     copilotDraft = null;
     copilotError = '';
     copilotApplied = false;
+  }
+
+  function openCopilotModal() {
+    showCopilotModal = true;
+  }
+
+  function closeCopilotModal() {
+    showCopilotModal = false;
+  }
+
+  function handleCopilotModalKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && showCopilotModal) {
+      closeCopilotModal();
+    }
+  }
+
+  function handleCopilotBackdropClick(event: MouseEvent) {
+    if (event.target === event.currentTarget) {
+      closeCopilotModal();
+    }
   }
 
   async function generateCopilotDraft() {
@@ -1432,6 +1447,8 @@
   />
 </svelte:head>
 
+<svelte:window onkeydown={handleCopilotModalKeydown} />
+
 <div class={profileShellClass}>
   <WorkspaceSidebar active="profile" />
 
@@ -1447,137 +1464,10 @@
             Complete your organization profile before reviewing ranked opportunity matches.
           </p>
         </div>
-      </section>
-
-      <section class={`${profileCardClass} mb-6 p-8 max-md:p-5`} aria-labelledby="profile-copilot-heading">
-        <div class="mb-6 flex items-start justify-between gap-4 max-lg:grid">
-          <div>
-            <p class="m-0 mb-2 text-xs font-black tracking-normal text-emerald-700 uppercase">Gemini copilot</p>
-            <h3 id="profile-copilot-heading" class="m-0 text-2xl leading-snug text-[#191c1e]">Company Profile Copilot</h3>
-            <p class="mt-1 max-w-[72ch] text-sm leading-6 text-[#45464d]">
-              Answer a few questions in plain language, then review a structured profile draft before applying it.
-            </p>
-          </div>
-
-          <div class="rounded-lg bg-[#f2f4f6] px-4 py-3 text-right max-lg:text-left">
-            <p class="m-0 text-[11px] font-black text-[#45464d] uppercase">Answered</p>
-            <p class="m-0 mt-1 text-xl font-black text-[#006c49]">{copilotAnsweredCount}/{copilotQuestions.length}</p>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-4 max-lg:grid-cols-1">
-          {#each copilotQuestions as question (question.id)}
-            <label class={profileFieldClass}>
-              <span>{question.question}</span>
-              <textarea
-                class={`${profileTextareaClass} min-h-20`}
-                bind:value={copilotAnswers[question.id]}
-                placeholder={question.placeholder}
-                rows="2"
-              ></textarea>
-            </label>
-          {/each}
-        </div>
-
-        <div class="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-5">
-          <div class="min-h-5 text-sm font-extrabold" aria-live="polite">
-            {#if copilotError}
-              <span class="text-red-700">{copilotError}</span>
-            {:else if copilotApplied}
-              <span class="text-emerald-700">Draft applied to the form.</span>
-            {:else if copilotDraft}
-              <span class="text-emerald-700">Draft ready for review.</span>
-            {/if}
-          </div>
-
-          <div class="flex flex-wrap justify-end gap-3 max-md:grid max-md:w-full">
-            <button class={profileGhostButtonClass} type="button" onclick={clearCopilotAnswers}>Clear answers</button>
-            <button class={profilePrimaryButtonClass} disabled={copilotGenerating || copilotAnsweredCount === 0} type="button" onclick={generateCopilotDraft}>
-              {copilotGenerating ? 'Generating...' : 'Generate profile draft'}
-              <span class="material-symbols-outlined" aria-hidden="true">auto_awesome</span>
-            </button>
-          </div>
-        </div>
-
-        {#if copilotDraft}
-          <div class="mt-6 grid grid-cols-[minmax(0,1fr)_260px] gap-5 max-lg:grid-cols-1">
-            <div class="rounded-lg border border-slate-200 bg-[#f8fafc] p-4">
-              <div class="mb-4 flex items-start justify-between gap-3 max-md:grid">
-                <div>
-                  <p class="m-0 text-xs font-black tracking-normal text-emerald-700 uppercase">Draft profile</p>
-                  <h4 class="m-0 mt-1 text-xl leading-snug text-[#191c1e]">
-                    {copilotDraft.profile.doingBusinessAs || copilotDraft.profile.legalEntityName || 'Company profile draft'}
-                  </h4>
-                </div>
-                <button class={profileSecondaryButtonClass} type="button" onclick={applyCopilotDraft}>Apply to form</button>
-              </div>
-
-              <dl class="m-0 grid grid-cols-2 gap-3 text-sm max-md:grid-cols-1">
-                <div>
-                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Legal entity</dt>
-                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'legalEntityName')}</dd>
-                </div>
-                <div>
-                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Location</dt>
-                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'location')}</dd>
-                </div>
-                <div>
-                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Applicant type</dt>
-                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'companyType')}</dd>
-                </div>
-                <div>
-                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Employees</dt>
-                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'employeeRange')}</dd>
-                </div>
-                <div>
-                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Industry</dt>
-                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'industry')}</dd>
-                </div>
-                <div>
-                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Sub-sector</dt>
-                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'subSector')}</dd>
-                </div>
-                <div>
-                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Funding need</dt>
-                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'fundingNeed')}</dd>
-                </div>
-                <div>
-                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Activities</dt>
-                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'activities')}</dd>
-                </div>
-                <div class="col-span-2 max-md:col-span-1">
-                  <dt class="text-[11px] font-black text-[#76777d] uppercase">Keywords</dt>
-                  <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'keywords')}</dd>
-                </div>
-              </dl>
-            </div>
-
-            <aside class="rounded-lg border border-slate-200 bg-white p-4">
-              <p class="m-0 text-xs font-black tracking-normal text-emerald-700 uppercase">Review</p>
-              <p class="mt-2 text-sm leading-6 text-[#45464d]">
-                {copilotDraftChangedFields.length > 0
-                  ? `${copilotDraftChangedFields.length} form fields will change.`
-                  : 'No form field changes detected.'}
-              </p>
-
-              {#if copilotDraftChangedFields.length > 0}
-                <div class="mt-3 flex flex-wrap gap-2">
-                  {#each copilotDraftChangedFields as field (field)}
-                    <span class="rounded-full border border-slate-200 bg-[#f2f4f6] px-2.5 py-1 text-xs font-black text-[#45464d]">{field}</span>
-                  {/each}
-                </div>
-              {/if}
-
-              {#if copilotDraft.notes.length > 0}
-                <ul class="mt-4 grid list-none gap-2 p-0 text-sm leading-6 text-[#45464d]">
-                  {#each copilotDraft.notes as note (note)}
-                    <li class="relative pl-4 before:absolute before:left-0 before:text-emerald-700 before:content-['-']">{note}</li>
-                  {/each}
-                </ul>
-              {/if}
-            </aside>
-          </div>
-        {/if}
+        <button class={profilePrimaryButtonClass} type="button" onclick={openCopilotModal}>
+          Open Gemini Copilot
+          <span class="material-symbols-outlined" aria-hidden="true">auto_awesome</span>
+        </button>
       </section>
 
       <section class={profileBuilderClass} aria-labelledby="company-heading">
@@ -1765,7 +1655,6 @@
           <a class={profileSecondaryButtonClass} href="/dashboard">Back</a>
           <div class={profileActionsRightClass}>
             <button class={profileGhostButtonClass} type="button" onclick={clearPersona}>Clear profile</button>
-            <button class={profileSecondaryButtonClass} type="button" onclick={resetPersona}>Reset sample</button>
             <button class={profilePrimaryButtonClass} disabled={profileSaving} type="button" onclick={saveAndContinue}>
               {profileSaving ? 'Saving...' : 'Save and continue'}
               <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
@@ -1787,6 +1676,172 @@
     </div>
   </main>
 </div>
+
+  {#if showCopilotModal}
+    <div
+      class="fixed inset-0 z-[100] flex items-center justify-center bg-[#0b1c30]/60 p-4 backdrop-blur-sm"
+      role="presentation"
+      onclick={handleCopilotBackdropClick}
+    >
+      <div
+        aria-labelledby="profile-copilot-heading"
+        aria-modal="true"
+        class="grid max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]"
+        role="dialog"
+      >
+        <header class="flex items-start justify-between gap-4 border-b border-slate-200 bg-[#f7f9fb] p-5">
+          <div class="min-w-0">
+            <p class="m-0 mb-2 text-xs font-black tracking-normal text-emerald-700 uppercase">Gemini copilot</p>
+            <h3 id="profile-copilot-heading" class="m-0 text-2xl leading-snug text-[#191c1e]">Company Profile Copilot</h3>
+            <p class="mt-1 max-w-[72ch] text-sm leading-6 text-[#45464d]">
+              Answer a few questions in plain language, then review a structured profile draft before applying it.
+            </p>
+          </div>
+
+          <button
+            aria-label="Close Company Profile Copilot"
+            class="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white leading-none text-[#191c1e] hover:bg-slate-100"
+            type="button"
+            onclick={closeCopilotModal}
+          >
+            <span class="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
+          </button>
+        </header>
+
+        <div class="grid gap-5 overflow-y-auto p-5">
+          <div class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-[#f2f4f6] px-4 py-3 max-md:grid">
+            <div>
+              <p class="m-0 text-[11px] font-black text-[#45464d] uppercase">Answered</p>
+              <p class="m-0 mt-1 text-xl font-black text-[#006c49]">{copilotAnsweredCount}/{copilotQuestions.length}</p>
+            </div>
+            <div class="min-h-5 text-sm font-extrabold" aria-live="polite">
+              {#if copilotError}
+                <span class="text-red-700">{copilotError}</span>
+              {:else if copilotApplied}
+                <span class="text-emerald-700">Draft applied to the form.</span>
+              {:else if copilotDraft}
+                <span class="text-emerald-700">Draft ready for review.</span>
+              {/if}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 max-lg:grid-cols-1">
+            {#each copilotQuestions as question (question.id)}
+              <label class={profileFieldClass}>
+                <span>{question.question}</span>
+                <textarea
+                  class={`${profileTextareaClass} min-h-20`}
+                  bind:value={copilotAnswers[question.id]}
+                  placeholder={question.placeholder}
+                  rows="2"
+                ></textarea>
+              </label>
+            {/each}
+          </div>
+
+          <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-5 max-md:grid">
+            <button class={profileGhostButtonClass} type="button" onclick={clearCopilotAnswers}>Clear answers</button>
+            <button class={profilePrimaryButtonClass} disabled={copilotGenerating || copilotAnsweredCount === 0} type="button" onclick={generateCopilotDraft}>
+              {copilotGenerating ? 'Generating...' : 'Generate profile draft'}
+              <span class="material-symbols-outlined" aria-hidden="true">auto_awesome</span>
+            </button>
+          </div>
+
+          {#if copilotDraft}
+            <div class="grid grid-cols-[minmax(0,1fr)_260px] gap-5 max-lg:grid-cols-1">
+              <div class="rounded-lg border border-slate-200 bg-[#f8fafc] p-4">
+                <div class="mb-4 flex items-start justify-between gap-3 max-md:grid">
+                  <div>
+                    <p class="m-0 text-xs font-black tracking-normal text-emerald-700 uppercase">Draft profile</p>
+                    <h4 class="m-0 mt-1 text-xl leading-snug text-[#191c1e]">
+                      {copilotDraft.profile.doingBusinessAs || copilotDraft.profile.legalEntityName || 'Company profile draft'}
+                    </h4>
+                  </div>
+                  <button class={profileSecondaryButtonClass} type="button" onclick={applyCopilotDraft}>Apply to form</button>
+                </div>
+
+                <dl class="m-0 grid grid-cols-2 gap-3 text-sm max-md:grid-cols-1">
+                  <div>
+                    <dt class="text-[11px] font-black text-[#76777d] uppercase">Legal entity</dt>
+                    <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'legalEntityName')}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-[11px] font-black text-[#76777d] uppercase">Location</dt>
+                    <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'location')}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-[11px] font-black text-[#76777d] uppercase">Applicant type</dt>
+                    <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'companyType')}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-[11px] font-black text-[#76777d] uppercase">Employees</dt>
+                    <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'employeeRange')}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-[11px] font-black text-[#76777d] uppercase">Industry</dt>
+                    <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'industry')}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-[11px] font-black text-[#76777d] uppercase">Sub-sector</dt>
+                    <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'subSector')}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-[11px] font-black text-[#76777d] uppercase">Funding need</dt>
+                    <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'fundingNeed')}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-[11px] font-black text-[#76777d] uppercase">Activities</dt>
+                    <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'activities')}</dd>
+                  </div>
+                  <div class="col-span-2 max-md:col-span-1">
+                    <dt class="text-[11px] font-black text-[#76777d] uppercase">Keywords</dt>
+                    <dd class="m-0 mt-1 text-[#191c1e]">{formatCopilotProfileValue(copilotDraft.profile, 'keywords')}</dd>
+                  </div>
+                </dl>
+              </div>
+
+              <aside class="rounded-lg border border-slate-200 bg-white p-4">
+                <p class="m-0 text-xs font-black tracking-normal text-emerald-700 uppercase">Review</p>
+                <p class="mt-2 text-sm leading-6 text-[#45464d]">
+                  {copilotDraftChangedFields.length > 0
+                    ? `${copilotDraftChangedFields.length} form fields will change.`
+                    : 'No form field changes detected.'}
+                </p>
+
+                {#if copilotDraftChangedFields.length > 0}
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    {#each copilotDraftChangedFields as field (field)}
+                      <span class="rounded-full border border-slate-200 bg-[#f2f4f6] px-2.5 py-1 text-xs font-black text-[#45464d]">{field}</span>
+                    {/each}
+                  </div>
+                {/if}
+
+                {#if copilotDraft.notes.length > 0}
+                  <ul class="mt-4 grid list-none gap-2 p-0 text-sm leading-6 text-[#45464d]">
+                    {#each copilotDraft.notes as note (note)}
+                      <li class="relative pl-4 before:absolute before:left-0 before:text-emerald-700 before:content-['-']">{note}</li>
+                    {/each}
+                  </ul>
+                {/if}
+              </aside>
+            </div>
+          {/if}
+        </div>
+
+        <footer class="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-[#f7f9fb] p-5">
+          <button class={profileSecondaryButtonClass} type="button" onclick={closeCopilotModal}>
+            Close
+          </button>
+          {#if copilotDraft}
+            <button class={profilePrimaryButtonClass} type="button" onclick={applyCopilotDraft}>
+              Apply to form
+              <span class="material-symbols-outlined" aria-hidden="true">check</span>
+            </button>
+          {/if}
+        </footer>
+      </div>
+    </div>
+  {/if}
 
   {#if showProfileBuilderWalkthrough}
     <div class="fixed inset-0 z-[100] flex items-center justify-center bg-[#0b1c30]/55 p-4 backdrop-blur-sm" role="presentation">

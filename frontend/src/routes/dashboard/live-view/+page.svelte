@@ -2,7 +2,6 @@
   import WorkspaceSidebar from '$lib/WorkspaceSidebar.svelte';
   import WorkspaceTopbar from '$lib/WorkspaceTopbar.svelte';
   import { browser } from '$app/environment';
-  import { pushState } from '$app/navigation';
   import { hydrateCachedFundingData } from '$lib/client/funding-cache';
   import {
     REVIEW_MATCH_THRESHOLD,
@@ -89,7 +88,6 @@
   let { data }: { data: FundingPageData } = $props();
   let cacheHydrated = $state(false);
   let profileHydrated = $state(false);
-  let loadingAnalytics = $state(false);
   let profile = $state<CompanyProfile>(createEmptyCompanyProfile());
   let hydrationSequence = 0;
   let lastHydratedRequestKey = $state<string | null>(null);
@@ -159,11 +157,6 @@
   const maxBenefitCategoryCount = $derived(getMaximumValue(analytics.benefitCategoryBars));
   const maxGrantProgramAmount = $derived(getMaximumValue(analytics.grantProgramBars));
   const maxTrendCount = $derived(getMaximumValue(analytics.trendBars));
-  const nextGrantsCount = $derived(Math.min(data.limits.maxCount, data.filters.grantsCount + data.limits.increment));
-  const nextBenefitsCount = $derived(Math.min(data.limits.maxCount, data.filters.benefitsCount + data.limits.increment));
-  const canLoadMoreAnalytics = $derived(
-    data.filters.grantsCount < data.limits.maxCount || data.filters.benefitsCount < data.limits.maxCount
-  );
   const cacheRequestKey = $derived(getFundingRequestKey(data));
 
   $effect(() => {
@@ -203,43 +196,6 @@
     cacheHydrated = true;
     profileHydrated = true;
     lastHydratedRequestKey = requestKey;
-    loadingAnalytics = false;
-  }
-
-  async function loadMoreAnalytics() {
-    if (!browser || loadingAnalytics || !canLoadMoreAnalytics) {
-      return;
-    }
-
-    const grantsCount = nextGrantsCount;
-    const benefitsCount = nextBenefitsCount;
-    const nextData = buildFundingSnapshot(grantsCount, benefitsCount);
-
-    loadingAnalytics = true;
-    pushState(liveViewRoute(grantsCount, benefitsCount), {});
-    await hydrateFunding(nextData);
-  }
-
-  function buildFundingSnapshot(grantsCount: number, benefitsCount: number): FundingPageData {
-    return {
-      ...data,
-      filters: {
-        grantsCount,
-        benefitsCount
-      },
-      grantsResult: {
-        ...data.grantsResult,
-        requested: grantsCount,
-        endpoint: updateGrantsEndpoint(data.grantsResult.endpoint, grantsCount),
-        error: grantsCount === data.filters.grantsCount ? data.grantsResult.error : null
-      },
-      benefits: {
-        ...data.benefits,
-        requested: benefitsCount,
-        endpoint: updateBenefitsEndpoint(data.benefits.endpoint, benefitsCount),
-        error: benefitsCount === data.filters.benefitsCount ? data.benefits.error : null
-      }
-    };
   }
 
   function getFundingRequestKey(payload: FundingPageData): string {
@@ -249,37 +205,6 @@
       payload.grantsResult.endpoint,
       payload.benefits.endpoint
     ].join('|');
-  }
-
-  function updateGrantsEndpoint(endpoint: string, count: number): string {
-    try {
-      const url = new URL(endpoint);
-      url.searchParams.set('limit', String(count));
-      url.searchParams.set('offset', '0');
-      url.searchParams.set('include_total', 'true');
-      return url.toString();
-    } catch {
-      return endpoint;
-    }
-  }
-
-  function updateBenefitsEndpoint(endpoint: string, count: number): string {
-    try {
-      const url = new URL(endpoint);
-      const segments = url.pathname.split('/');
-      const firstIndex = segments.lastIndexOf('first');
-
-      if (firstIndex >= 0 && firstIndex + 1 < segments.length) {
-        segments[firstIndex + 1] = String(count);
-        url.pathname = segments.join('/');
-      } else {
-        url.searchParams.set('limit', String(count));
-      }
-
-      return url.toString();
-    } catch {
-      return endpoint;
-    }
   }
 
   function valueIsPresent(value: unknown): boolean {
@@ -525,9 +450,6 @@
     return Math.max(0, ...bars.map((bar) => bar.value));
   }
 
-  function liveViewRoute(grantsCount: number, benefitsCount: number): string {
-    return `/dashboard/live-view?grantsCount=${grantsCount}&benefitsCount=${benefitsCount}`;
-  }
 </script>
 
 <svelte:head>
@@ -780,28 +702,6 @@
             </article>
           </section>
 
-          <section class="rounded-xl border border-[#c6c6cd] bg-white p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)]" aria-label="Analytics record window">
-            <div class="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-              <div>
-                <h3 class="m-0 text-lg font-semibold leading-tight text-[#191c1e]">Loaded match window</h3>
-                <p class="m-0 mt-2 max-w-2xl text-sm leading-6 text-[#45464d]">
-                  Graphs include the matched grant and benefit records available in the current analytics window.
-                </p>
-              </div>
-              {#if canLoadMoreAnalytics}
-                <button
-                  class="rounded-lg border-2 border-[#c6c6cd] px-5 py-2.5 text-sm font-semibold text-[#0b1c30] transition hover:border-[#0b1c30] hover:bg-[#eceef0] disabled:cursor-wait disabled:opacity-60"
-                  type="button"
-                  disabled={loadingAnalytics}
-                  onclick={loadMoreAnalytics}
-                >
-                  {loadingAnalytics ? 'Finding more matches' : 'Load more records for matches'}
-                </button>
-              {:else}
-                <p class="m-0 text-sm leading-6 text-[#45464d]">The match analytics record window is at its limit.</p>
-              {/if}
-            </div>
-          </section>
         {/if}
       </div>
     </main>

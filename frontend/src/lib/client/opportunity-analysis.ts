@@ -8,6 +8,8 @@ import {
 } from './opportunity-matches';
 
 export type OpportunityAnalysis = {
+  fit: OpportunityFit;
+  should_show: boolean;
   fit_summary: string;
   eligibility_flags: string[];
   missing_company_info: string[];
@@ -39,6 +41,7 @@ type FetchOpportunityAnalysisOptions<TRecord extends GenericRecord> = {
   profile: CompanyProfile;
   match: OpportunityBenefitMatch<TRecord>;
   description: string;
+  fitJudgment?: OpportunityFitJudgment | null;
   timeout?: number;
   forceRefresh?: boolean;
 };
@@ -63,7 +66,7 @@ type CachedOpportunityFitJudgment = {
 };
 type OpportunityFitJudgmentCache = Record<string, CachedOpportunityFitJudgment>;
 
-const OPPORTUNITY_ANALYSIS_CACHE_KEY = 'fundradar.opportunityAnalysis.v1';
+const OPPORTUNITY_ANALYSIS_CACHE_KEY = 'fundradar.opportunityAnalysis.v2';
 const OPPORTUNITY_ANALYSIS_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const OPPORTUNITY_ANALYSIS_CACHE_MAX_ENTRIES = 250;
 const OPPORTUNITY_FIT_JUDGMENT_CACHE_KEY = 'fundradar.opportunityFitJudgments.v1';
@@ -75,10 +78,11 @@ export async function fetchOpportunityAnalysis<TRecord extends GenericRecord>({
   profile,
   match,
   description,
+  fitJudgment = null,
   timeout = 30,
   forceRefresh = false
 }: FetchOpportunityAnalysisOptions<TRecord>): Promise<OpportunityAnalysis> {
-  const cacheKey = buildOpportunityAnalysisCacheKey(profile, match, description);
+  const cacheKey = buildOpportunityAnalysisCacheKey(profile, match, description, fitJudgment);
 
   if (!forceRefresh) {
     const cached = readCachedOpportunityAnalysis(cacheKey);
@@ -96,6 +100,7 @@ export async function fetchOpportunityAnalysis<TRecord extends GenericRecord>({
       profile,
       opportunity: match.record,
       match: buildOpportunityMatchPayload(match, description),
+      fit_judgment: fitJudgment,
       timeout
     })
   });
@@ -112,9 +117,10 @@ export async function fetchOpportunityAnalysis<TRecord extends GenericRecord>({
 export function getOpportunityAnalysisCacheKey<TRecord extends GenericRecord>(
   profile: CompanyProfile,
   match: OpportunityBenefitMatch<TRecord>,
-  description: string
+  description: string,
+  fitJudgment: OpportunityFitJudgment | null = null
 ): string {
-  return buildOpportunityAnalysisCacheKey(profile, match, description);
+  return buildOpportunityAnalysisCacheKey(profile, match, description, fitJudgment);
 }
 
 export function getOpportunityFitJudgmentCacheKey<TRecord extends GenericRecord>(
@@ -274,7 +280,8 @@ function writeCachedOpportunityFitJudgments(judgments: Record<string, Opportunit
 function buildOpportunityAnalysisCacheKey<TRecord extends GenericRecord>(
   profile: CompanyProfile,
   match: OpportunityBenefitMatch<TRecord>,
-  description: string
+  description: string,
+  fitJudgment: OpportunityFitJudgment | null = null
 ): string {
   return [
     'business-benefits',
@@ -283,7 +290,8 @@ function buildOpportunityAnalysisCacheKey<TRecord extends GenericRecord>(
     hashString(stableStringify(recordAnalysisCacheShape(match.record))),
     hashString(description),
     match.matchScore,
-    match.potentialFunding ?? 'none'
+    match.potentialFunding ?? 'none',
+    hashString(stableStringify(fitJudgmentAnalysisCacheShape(fitJudgment)))
   ].join('|');
 }
 
@@ -342,6 +350,20 @@ function profileAnalysisCacheShape(profile: CompanyProfile): Partial<CompanyProf
   };
 }
 
+function fitJudgmentAnalysisCacheShape(fitJudgment: OpportunityFitJudgment | null): Record<string, unknown> {
+  if (!fitJudgment) {
+    return { fit: 'unjudged' };
+  }
+
+  return {
+    fit: fitJudgment.fit,
+    should_show: fitJudgment.should_show,
+    confidence: fitJudgment.confidence,
+    reason: fitJudgment.reason,
+    risk_notes: fitJudgment.risk_notes
+  };
+}
+
 function recordAnalysisCacheShape(record: GenericRecord): GenericRecord {
   return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined));
 }
@@ -349,6 +371,8 @@ function recordAnalysisCacheShape(record: GenericRecord): GenericRecord {
 function normalizeOpportunityAnalysis(value: unknown): OpportunityAnalysis {
   const payload = isRecord(value) ? value : {};
   return {
+    fit: readFit(payload.fit),
+    should_show: payload.should_show !== false,
     fit_summary: readString(payload.fit_summary, 'Review this opportunity against the company profile.'),
     eligibility_flags: readStringList(payload.eligibility_flags),
     missing_company_info: readStringList(payload.missing_company_info),

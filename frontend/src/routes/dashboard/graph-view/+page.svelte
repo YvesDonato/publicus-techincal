@@ -44,7 +44,7 @@
   } from '$lib/client/semantic-scoring';
   import { onMount } from 'svelte';
 
-  const DEFAULT_BACKEND_API_URL = 'http://127.0.0.1:8000';
+  const DEFAULT_BACKEND_API_URL = '';
   const BENEFIT_RECORD_WINDOW = 100;
   const HISTORICAL_GRANT_RECORD_WINDOW = 500;
   const GRAPH_MATCH_LIMIT = 25;

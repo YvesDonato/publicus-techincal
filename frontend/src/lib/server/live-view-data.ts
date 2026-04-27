@@ -34,7 +34,7 @@ type BenefitsResult = DatasetResult<GenericRecord> & {
   source: string | null;
 };
 
-const DEFAULT_BACKEND_API_URL = 'http://127.0.0.1:8000';
+const DEFAULT_BACKEND_API_URL = '';
 const DEFAULT_COUNT = 100;
 const COUNT_INCREMENT = 100;
 const MAX_COUNT = 5000;
@@ -103,7 +103,7 @@ function buildBusinessBenefitsResult(backendApiUrl: string, count: number): Bene
 }
 
 export function loadGrantsContributionsData(_fetch: typeof globalThis.fetch, url: URL) {
-  const backendApiUrl = (env.BACKEND_API_URL ?? DEFAULT_BACKEND_API_URL).replace(/\/$/, '');
+  const backendApiUrl = (env.PUBLIC_BACKEND_API_URL ?? DEFAULT_BACKEND_API_URL).replace(/\/$/, '');
   const grantsCount = parseBoundedInteger(
     url.searchParams.get('count') ?? url.searchParams.get('grantsCount'),
     DEFAULT_COUNT,
@@ -126,7 +126,7 @@ export function loadGrantsContributionsData(_fetch: typeof globalThis.fetch, url
 }
 
 export function loadBusinessBenefitsFinderData(_fetch: typeof globalThis.fetch, url: URL) {
-  const backendApiUrl = (env.BACKEND_API_URL ?? DEFAULT_BACKEND_API_URL).replace(/\/$/, '');
+  const backendApiUrl = (env.PUBLIC_BACKEND_API_URL ?? DEFAULT_BACKEND_API_URL).replace(/\/$/, '');
   const benefitsCount = parseBoundedInteger(
     url.searchParams.get('count') ?? url.searchParams.get('benefitsCount'),
     DEFAULT_COUNT,
@@ -148,7 +148,7 @@ export function loadBusinessBenefitsFinderData(_fetch: typeof globalThis.fetch, 
 }
 
 export function loadLiveViewData(_fetch: typeof globalThis.fetch, url: URL) {
-  const backendApiUrl = (env.BACKEND_API_URL ?? DEFAULT_BACKEND_API_URL).replace(/\/$/, '');
+  const backendApiUrl = (env.PUBLIC_BACKEND_API_URL ?? DEFAULT_BACKEND_API_URL).replace(/\/$/, '');
   const filters = parseLiveViewFilters(url);
   const grantsResult = buildGrantsResult(backendApiUrl, filters.grantsCount);
   const benefits = buildBusinessBenefitsResult(backendApiUrl, filters.benefitsCount);
